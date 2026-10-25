@@ -18,7 +18,7 @@ jobs:
     name: Validate release artifact inputs
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Reject generated backup and archive artifacts
         shell: pwsh
         run: ./scripts/verify-release-artifact.ps1
@@ -67,7 +67,7 @@ jobs:
           - name: reranker
             files: -f docker-compose.yml -f docker-compose.reranker.yml --profile reranker
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - run: cp .env.example .env
       - name: Verify optional graph deployment boundaries
         if: matrix.name == 'local'
@@ -115,7 +115,7 @@ jobs:
             test: tests/test_mcp_governance.py
             pythonpath: mcp-postgres-gcor
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -135,7 +135,7 @@ jobs:
     name: Python tests (recovery-controller)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -147,7 +147,7 @@ jobs:
     name: Reliability PowerShell negative tests
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - shell: powershell
         run: ./tests/test_reliability_powershell.ps1
       - name: LAN security negative tests
@@ -165,7 +165,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
@@ -254,7 +254,7 @@ jobs:
       contents: read
       security-events: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Scan repository and dependencies
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
@@ -287,7 +287,7 @@ jobs:
     name: Secret scan
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - uses: gitleaks/gitleaks-action@v2
