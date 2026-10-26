@@ -14,7 +14,8 @@ from fastapi import HTTPException
 MAX_EVENTS = 200
 MAX_CHARS = 120000
 MAX_PARTS = 40
-PROMPT_VERSION = 'discussion-evidence-v1'
+# v2: excerpts name their speaker and time so findings and decisions can be attributed.
+PROMPT_VERSION = 'discussion-evidence-v2'
 
 
 class SynthesisPending(Exception):
@@ -30,14 +31,22 @@ def revision(value):
     return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(',', ':'), ensure_ascii=False).encode()).hexdigest()
 
 
-def batches(evidence):
+def speaker(row, names=None):
+    author = row['author']
+    name = re.sub(r'[\r\n\[\]:]', ' ', (names or {}).get(author) or '').strip()[:60]
+    return f"{name or 'npub ' + author[:8]} at {row['created_at']:%Y-%m-%d %H:%M} UTC"
+
+
+def batches(evidence, names=None):
     # generate_grounded_answer accepts six excerpts of at most 1200 characters.
     # Split before calling it so long contributions are not silently truncated.
+    # Each excerpt's title names its speaker and time; the label is metadata, not evidence text.
     excerpts = []
     for row in evidence:
         content = re.sub(r'\s+', ' ', row['content']).strip()
+        label = speaker(row, names)
         for offset in range(0, max(1, len(content)), 1200):
-            excerpts.append({'title': row['event_id'], 'content': content[offset:offset+1200],
+            excerpts.append({'title': f"{row['event_id']} ({label})", 'content': content[offset:offset+1200],
                              'source_uri': 'buzz://event/'+row['event_id'], 'event_id': row['event_id']})
     result = [excerpts[i:i+6] for i in range(0, len(excerpts), 6)]
     if len(result) > MAX_PARTS:
@@ -45,9 +54,54 @@ def batches(evidence):
     return result
 
 
+async def display_names(pool, authors):
+    """Best-effort Buzz display names; short keys are used when they are unavailable."""
+    if not authors:
+        return {}
+    try:
+        rows = await pool.fetch(
+            "SELECT DISTINCT ON (pubkey) encode(pubkey,'hex') AS author, display_name FROM public.users "
+            "WHERE pubkey = ANY($1::bytea[]) AND display_name IS NOT NULL ORDER BY pubkey",
+            [bytes.fromhex(a) for a in set(authors)])
+    except Exception:
+        return {}
+    return {r['author']: r['display_name'] for r in rows}
+
+
+async def thread_event_ids(pool, channel_id, event, before):
+    """Root and replies of the thread the command was posted in, oldest first, up to the command."""
+    anchors = [t[1] for t in event['tags'] if len(t) > 1 and t[0] == 'e' and re.fullmatch('[0-9a-f]{64}', str(t[1]))]
+    if not anchors:
+        raise HTTPException(422, 'Send "!knowledge synthesize thread" as a reply inside the thread to synthesize')
+    anchor = anchors[0]
+    has_metadata = bool(await pool.fetchval("SELECT to_regclass('public.thread_metadata')"))
+    root = None
+    if has_metadata:
+        root = await pool.fetchval(
+            "SELECT encode(COALESCE(root_event_id, event_id),'hex') FROM public.thread_metadata "
+            "WHERE event_id = decode($1,'hex') AND channel_id = $2 LIMIT 1", anchor, UUID(channel_id))
+    root = root or anchor
+    members = ("OR id IN (SELECT event_id FROM public.thread_metadata WHERE root_event_id = decode($3,'hex') AND channel_id = $1) "
+               if has_metadata else "")
+    found = await pool.fetch(
+        "SELECT encode(id,'hex') AS id FROM public.events "
+        "WHERE channel_id=$1 AND deleted_at IS NULL AND kind IN (9,40002) AND created_at<=$2 "
+        f"AND (id = decode($3,'hex') {members}OR tags @> jsonb_build_array(jsonb_build_array('e', $3::text))) "
+        "AND btrim(content, E' \\t\\r\\n`') NOT LIKE '!knowledge%' "
+        "AND NOT EXISTS (SELECT 1 FROM jsonb_array_elements(tags) t WHERE t->>0='gcor') "
+        f"ORDER BY created_at,id LIMIT {MAX_EVENTS + 1}", UUID(channel_id), before, root)
+    if len(found) > MAX_EVENTS:
+        raise HTTPException(422, f'Thread exceeds {MAX_EVENTS} messages; use synthesize session START_EVENT_ID END_EVENT_ID')
+    if not found:
+        raise HTTPException(404, 'No discussion messages found in this thread')
+    return [r['id'] for r in found]
+
+
 async def select_evidence(pool, p, event, row, args):
     from buzz_chat import source_events
-    if args.startswith('session '):
+    if args.strip() == 'thread':
+        ids = await thread_event_ids(pool, p.channel_id, event, row['created_at'])
+    elif args.startswith('session '):
         bounds = args.split()[1:]
         if len(bounds) != 2:
             raise HTTPException(422, 'Use synthesize session START_EVENT_ID END_EVENT_ID')
@@ -114,7 +168,7 @@ async def synthesize(app, p, event, row, args):
         await pool.execute("UPDATE gcor.buzz_synthesis_jobs SET status='stale',updated_at=now() WHERE event_id=$1", event['id'])
         raise HTTPException(409, 'Synthesis configuration changed; create a fresh request')
     parts = json.loads(job['parts']) if isinstance(job['parts'], str) else job['parts']
-    work = batches(evidence)
+    work = batches(evidence, await display_names(pool, [r['author'] for r in evidence]))
     if len(parts) < len(work):
         batch = work[len(parts)]
         answer = await main.generate_grounded_answer(

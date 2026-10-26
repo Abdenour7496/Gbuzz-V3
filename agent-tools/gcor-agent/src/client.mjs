@@ -120,3 +120,11 @@ export async function searchKnowledge({ channelId, query, topK = 6 }, options) {
     label: n.label, excerpt: clip(n.content, 300) }));
   return { results: chunks, related };
 }
+
+export async function listUnanswered({ channelId, limit = 20 }, options) {
+  const channel = requireChannel(channelId);
+  const rows = await signedPost('/api/workspace/unanswered', { channel_id: channel, status: 'open',
+    limit: Math.max(1, Math.min(100, Number(limit) || 20)) }, options);
+  return { questions: (Array.isArray(rows) ? rows : []).map(q => ({ id: q.id, question: q.question,
+    asked: q.asked_count, people: q.distinct_askers, last_asked: q.last_asked_at })) };
+}

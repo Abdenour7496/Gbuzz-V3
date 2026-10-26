@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { bech32 } from '@scure/base';
-import { parseSecretKey, signHttpAuth, requireChannel, askKnowledge, searchKnowledge, publicKeyHex, KnowledgeError } from '../src/client.mjs';
+import { parseSecretKey, signHttpAuth, requireChannel, askKnowledge, searchKnowledge, listUnanswered, publicKeyHex, KnowledgeError } from '../src/client.mjs';
 
 const HEX = '7f'.repeat(32);
 const CHANNEL = '11111111-1111-4111-8111-111111111111';
@@ -48,4 +48,14 @@ test('authorization failures become actionable messages', async () => {
 test('unreachable service is reported, not thrown raw', async () => {
   const fetchImpl = async () => { throw new TypeError('fetch failed'); };
   await assert.rejects(askKnowledge({ channelId: CHANNEL, question: 'q' }, { secret: parseSecretKey(HEX), fetchImpl }), /unreachable/);
+});
+
+test('unanswered lists open questions without asker identities', async () => {
+  let seen;
+  const fetchImpl = async (url, init) => { seen = { url, body: JSON.parse(init.body) };
+    return new Response(JSON.stringify([{ id: 'q1', question: 'Who owns X?', asked_count: 3, distinct_askers: 2, last_asked_at: 't', askers: ['secret'] }])); };
+  const r = await listUnanswered({ channelId: CHANNEL, limit: 500 }, { secret: parseSecretKey(HEX), fetchImpl, origin: 'http://k:5011' });
+  assert.equal(seen.url, 'http://k:5011/api/workspace/unanswered');
+  assert.deepEqual(seen.body, { channel_id: CHANNEL, status: 'open', limit: 100 });
+  assert.deepEqual(r.questions, [{ id: 'q1', question: 'Who owns X?', asked: 3, people: 2, last_asked: 't' }]);
 });

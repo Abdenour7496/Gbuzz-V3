@@ -24,6 +24,7 @@ from buzz_synthesis import SynthesisPending
 HELP = """Knowledge commands (send as ordinary Buzz messages):
 !knowledge propose Title | finding or decision
 !knowledge synthesize (latest 50 discussion messages, or the message you reply to)
+!knowledge synthesize thread (reply inside a thread: its root and all replies, with speakers)
 !knowledge synthesize EVENT_ID [EVENT_ID ...] (up to 200 messages)
 !knowledge synthesize session START_EVENT_ID END_EVENT_ID
 !knowledge status COMMAND_EVENT_ID
@@ -167,6 +168,9 @@ async def execute(app,row):
                 from buzz_synthesis import synthesize
                 evidence,content,provenance=await synthesize(app,p,event,row,args)
                 title='Discussion findings '+event['id'][:8]
+                if args.strip()=='thread' and evidence:
+                    opening=re.sub(r'\s+',' ',evidence[0]['content']).strip()
+                    title=('Thread findings: '+opening[:90]+('…' if len(opening)>90 else ''))[:300]
             refs=[r['event_id'] for r in evidence]
             content=content.strip()+'\n\nSupporting Buzz events:\n'+'\n'.join('buzz://event/'+i for i in refs+[event['id']])
             await principal(app.state.pool,p.channel_id,p.subject)

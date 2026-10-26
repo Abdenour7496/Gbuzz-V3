@@ -39,6 +39,7 @@ from document_parsing import extract as parse_document
 from parser_client import extract as parse_isolated_document
 from graph_retrieval import candidates as graph_candidates
 import reranker
+import unanswered
 from audit_pack import router as audit_pack_router
 
 logger = logging.getLogger("gcor.proxy")
@@ -86,6 +87,10 @@ RETRIEVAL_MAX_CHUNKS_PER_DOCUMENT = int(os.getenv("RETRIEVAL_MAX_CHUNKS_PER_DOCU
 # channel/access/row-level-security filters instead of returning a starved result. "auto" enables
 # relaxed_order only when the installed pgvector supports it; "off" never sets it.
 HNSW_ITERATIVE_SCAN = os.getenv("HNSW_ITERATIVE_SCAN", "auto").strip().lower()
+# Codes and ticket numbers in a question ("INC-6818", "kb00042", "CVE 2024 1234") are matched as
+# identifiers, tolerant of case and of the separator between their letter and digit runs, and the
+# matching chunks get their own reciprocal-rank contribution. 0 disables.
+RETRIEVAL_IDENTIFIER_WEIGHT = float(os.getenv("RETRIEVAL_IDENTIFIER_WEIGHT", "0.5"))
 HNSW_EF_SEARCH = int(os.getenv("HNSW_EF_SEARCH", "0"))
 API_QUEUE_SECONDS = float(os.getenv("API_QUEUE_SECONDS", "10"))
 REQUEST_BODY_TIMEOUT_SECONDS = float(os.getenv("REQUEST_BODY_TIMEOUT_SECONDS", "60"))
@@ -1217,6 +1222,7 @@ async def lifespan(app: FastAPI):
         try: publisher=asyncio.create_task(run_publisher(app.state.pool, app.state.governance_s3))
         finally: current_principal.reset(token)
     app.state.workflows_available = bool(await app.state.pool.fetchval("SELECT to_regclass('gcor.ingestion_jobs')"))
+    app.state.unanswered_available = bool(await app.state.pool.fetchval("SELECT to_regclass('gcor.unanswered_questions')"))
     job_worker = None
     if app.state.workflows_available and os.getenv('GCOR_ACCESS_MODE','legacy')=='legacy' and os.getenv('GCOR_INGESTION_WORKER','true')=='true':
         token=current_principal.set(Principal('ingestion-worker','','',role='service',workload=True,operations=frozenset({'ingest'})))
@@ -1239,6 +1245,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="gcor-proxy", version="0.1.0", lifespan=lifespan)
 app.include_router(workspace_router)
+app.include_router(unanswered.router)
 
 
 @app.exception_handler(asyncpg.PostgresConnectionError)
@@ -1689,6 +1696,40 @@ async def ingest_payload(
 # Evidence validity: documents without Buzz evidence or wiki dependencies are always current
 # (same rule as the first branch of gcor.knowledge_evidence_current); checking that inline skips
 # one PL/pgSQL call per candidate document, roughly a third of retrieval time at 100k chunks.
+IDENTIFIER_TOKEN = re.compile(r"(?<![A-Za-z0-9])(?=[A-Za-z0-9_-]*\d)(?=[A-Za-z0-9_-]*[A-Za-z])[A-Za-z0-9]+(?:[-_][A-Za-z0-9]+)*(?![A-Za-z0-9])")
+IDENTIFIER_SPACED = re.compile(r"(?<![A-Za-z0-9])([A-Za-z]{2,10})[ ]((?:\d{2,}[-_ ]?)+)(?![A-Za-z0-9])")
+
+
+def identifier_pattern(query: str) -> str | None:
+    """A case-insensitive POSIX regex matching codes in the query, or None when there are none.
+
+    An identifier is a token mixing letters and digits (INC-6818, KB00042, v2.3 is not one because
+    it has no letter run of 2+) or a short word followed by a number (INC 6818). Each letter/digit
+    run must appear in order, separated by nothing, '-', '_' or a space, with no alphanumeric
+    character directly before or after. Plain words and plain numbers are left to the other legs.
+    """
+    if RETRIEVAL_IDENTIFIER_WEIGHT <= 0 or not query:
+        return None
+    tokens: list[list[str]] = []
+    candidates = [m.group(0) for m in IDENTIFIER_TOKEN.finditer(query[:2000])]
+    candidates += [f"{m.group(1)} {m.group(2)}" for m in IDENTIFIER_SPACED.finditer(query[:2000])]
+    for token in candidates:
+        runs = re.findall(r"[A-Za-z]+|\d+", token)
+        letters = [r for r in runs if r.isalpha()]
+        digits = [r for r in runs if r.isdigit()]
+        if not letters or not digits or not any(len(r) >= 2 for r in letters) or sum(map(len, digits)) < 2:
+            continue
+        if len(token) > 40 or runs in tokens:
+            continue
+        tokens.append(runs)
+        if len(tokens) >= 5:
+            break
+    if not tokens:
+        return None
+    alternatives = ["[-_ ]?".join(runs) for runs in tokens]
+    return "(^|[^[:alnum:]])(" + "|".join(alternatives) + ")($|[^[:alnum:]])"
+
+
 def result_pool_size(top_k: int) -> int:
     """Rows fetched from the fused ranking before reranking / per-document capping trims to top_k.
     With both features off this is exactly top_k, so the result is unchanged."""
@@ -1785,6 +1826,24 @@ async def run_retrieval_query(
                   AND (setweight(to_tsvector('english', COALESCE(d.title, '')), 'A') || c.search_vector) @@ search_terms.any_query
                 ORDER BY ts_rank_cd(setweight(to_tsvector('english', COALESCE(d.title, '')), 'A') || c.search_vector, search_terms.any_query, 32) DESC
                 LIMIT ($6 * 4)
+            ), identifier_candidates AS (
+                SELECT c.id, c.node_id, c.document_id, c.ordinal, c.content, c.embedding, d.title, d.source_uri, d.created_at, d.metadata, d.content_sha256, c.search_vector
+                FROM gcor.chunks c
+                JOIN gcor.documents d ON d.id = c.document_id
+                JOIN gcor.nodes n ON n.id = c.node_id
+                WHERE $18::text IS NOT NULL AND d.access_level = $2
+                  AND ($3::text IS NULL OR d.agent_id IS NULL OR d.agent_id = $3)
+                  AND ($3::text IS NULL OR n.agent_id IS NULL OR n.agent_id = $3)
+                                    AND ($10::text IS NULL OR d.channel_id = $10)
+                                    AND ($11::text IS NULL OR d.metadata->>'channel_name' = $11)
+                                    AND ($12::bool IS FALSE OR COALESCE(d.metadata->>'knowledge_state', $14::text) = 'approved')
+                                    AND ($12::bool IS FALSE OR ((NOT (d.metadata ? 'buzz_evidence_ids') AND NOT (d.metadata ? 'wiki_dependencies')) OR gcor.knowledge_evidence_current(d.id)))
+                  AND ($16::text IS NULL OR NOT(d.metadata ? 'knowledge_readers') OR d.metadata->'knowledge_readers'='null'::jsonb OR d.metadata->'knowledge_readers' @> jsonb_build_array($16::text))
+                  AND n.confidence >= $4
+                  AND n.valid_from <= $5 AND (n.valid_to IS NULL OR n.valid_to >= $5)
+                  AND (COALESCE(d.title, '') || ' ' || c.content) ~* $18
+                ORDER BY d.created_at DESC
+                LIMIT ($6 * 4)
             ), graph_candidates AS (
                 SELECT c.id,c.node_id,c.document_id,c.ordinal,c.content,c.embedding,d.title,d.source_uri,d.created_at,d.metadata,d.content_sha256,c.search_vector
                 FROM gcor.chunks c JOIN gcor.documents d ON d.id=c.document_id JOIN gcor.nodes n ON n.id=c.node_id
@@ -1801,13 +1860,16 @@ async def run_retrieval_query(
                 UNION
                 SELECT * FROM lexical_candidates
                 UNION
+                SELECT * FROM identifier_candidates
+                UNION
                 SELECT * FROM graph_candidates
             ), scored AS (
                 SELECT c.*,
                        CASE WHEN $1::vector IS NULL THEN NULL ELSE 1 - (c.embedding <=> $1::vector) END AS vector_score,
                        COALESCE(ts_rank_cd(setweight(to_tsvector('english', COALESCE(c.title, '')), 'A') || c.search_vector,
                                            search_terms.any_query, 32), 0.0) AS lexical_score,
-                       COALESCE(NULLIF(c.metadata->>'knowledge_approved_at', '')::timestamptz, c.created_at) AS governance_time
+                       COALESCE(NULLIF(c.metadata->>'knowledge_approved_at', '')::timestamptz, c.created_at) AS governance_time,
+                       ($18::text IS NOT NULL AND (COALESCE(c.title, '') || ' ' || c.content) ~* $18) AS identifier_match
                 FROM candidates c CROSS JOIN search_terms
             ), fused AS (
                 -- Reciprocal-rank fusion: each leg contributes weight/(k + rank). Ranks, unlike raw
@@ -1822,7 +1884,10 @@ async def run_retrieval_query(
                                                + (count(*) OVER (PARTITION BY s.vector_score) - 1) / 2.0) END
                              + CASE WHEN s.lexical_score > 0
                                     THEN $9 / (10.0 + rank() OVER (ORDER BY s.lexical_score DESC)
-                                               + (count(*) OVER (PARTITION BY s.lexical_score) - 1) / 2.0) ELSE 0.0 END) AS score
+                                               + (count(*) OVER (PARTITION BY s.lexical_score) - 1) / 2.0) ELSE 0.0 END
+                             + CASE WHEN s.identifier_match
+                                    THEN $19 / (10.0 + rank() OVER (PARTITION BY s.identifier_match ORDER BY s.lexical_score DESC, s.vector_score DESC NULLS LAST)
+                                               + (count(*) OVER (PARTITION BY s.identifier_match, s.lexical_score, s.vector_score) - 1) / 2.0) ELSE 0.0 END) AS score
                 FROM scored s
             )
             SELECT f.id, f.node_id, f.document_id, f.ordinal, f.content, f.title, f.source_uri, f.created_at, f.metadata,
@@ -1848,7 +1913,7 @@ async def run_retrieval_query(
             query_vector, access_level, agent_id, min_confidence, now, top_k,
                         query, vector_weight, lexical_weight, channel_id, channel_name, approved_only, prefer_recent_approved,
                         "proposed" if principal else "approved", graph_documents, principal.subject if principal else None,
-                        result_pool_size(top_k),
+                        result_pool_size(top_k), identifier_pattern(query), RETRIEVAL_IDENTIFIER_WEIGHT,
         )
         head = matches[:top_k]
         if head and not any(row["lexical_score"] > 0 for row in head) and max(row["vector_score"] for row in head) < RETRIEVAL_MIN_VECTOR_SCORE:
@@ -2404,6 +2469,8 @@ async def ask(
         citations=[];normalized=[];graph_nodes=[];matches=[]
     else:
         await verify_release_authorization(request, citations)
+        if not matches and getattr(request.app.state, "unanswered_available", False):
+            await unanswered.record(request.app.state.pool, query)
     REQUEST_DURATION.observe(time.perf_counter() - started)
     return {
         "answer": answer,
@@ -2453,6 +2520,8 @@ async def ask_reply(
         citations=[];graph_nodes=[];matches=[]
     else:
         await verify_release_authorization(request, citations)
+        if not matches and getattr(request.app.state, "unanswered_available", False):
+            await unanswered.record(request.app.state.pool, query)
     reply_text = compose_chat_reply(
         query,
         citations,

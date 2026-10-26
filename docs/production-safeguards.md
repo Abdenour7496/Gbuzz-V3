@@ -79,6 +79,9 @@ Configure these in `.env`; Compose passes them to the proxy. Defaults:
 | `RETRIEVAL_VECTOR_WEIGHT` | 0.5 | Default weight of the vector leg in reciprocal-rank fusion (keyword leg = 1 − this). Requests may still pass `vector_weight`/`lexical_weight`. |
 | `RETRIEVAL_MIN_VECTOR_SCORE` | 0.45 | Abstention floor: if no candidate shares a keyword with the question and the best cosine similarity is below this, retrieval returns nothing and `/api/ask` answers `No authorized evidence was found.` |
 | `RETRIEVAL_MAX_CHUNKS_PER_DOCUMENT` | 0 | At most this many chunks of one document per result set; 0 disables the limit. |
+| `RETRIEVAL_IDENTIFIER_WEIGHT` | 0.5 | Weight of the identifier leg: codes in the question (`INC-6818`, `inc 6818`, `KB00042`) are matched case-insensitively with any `-`/`_`/space separator and fused by reciprocal rank. 0 disables. |
+| `UNANSWERED_QUEUE_ENABLED` | true | Record questions that found no authorised evidence (migration 0017) for the asking channel. Listed at `/api/workspace/unanswered` and in the workspace UI; asker identities are stored for de-duplication but never returned. |
+| `UNANSWERED_RETENTION_DAYS` | 90 | Answered or dismissed questions older than this are deleted; open questions are kept. |
 | `HNSW_ITERATIVE_SCAN` | auto | pgvector ≥ 0.8 iterative index scans, so the HNSW index keeps searching until enough rows pass the channel/access/RLS filters. `auto` enables `relaxed_order` only when the installed pgvector supports it (checked at startup); `off` never sets it. |
 | `HNSW_EF_SEARCH` | 0 | HNSW candidate list size; 0 keeps the pgvector default (40). |
 | `RERANKER_URL` | empty | Local cross-encoder rerank endpoint (llama.cpp `/v1/rerank`, Jina/Cohere or TEI format). Empty disables reranking. Fail-open: errors, timeouts or malformed replies keep the fused order, and the reranker is then skipped for `RERANK_COOLDOWN_SECONDS` (30). |
