@@ -146,12 +146,41 @@ class HnswSettings(unittest.TestCase):
         self.assertEqual(self.settings("0.8.1", fail=True), {})
 
 
+class IdentifierPattern(unittest.TestCase):
+    def test_codes_are_found_with_any_separator_or_case(self):
+        for query, expected in (("What was the root cause of INC-6818?", "INC[-_ ]?6818"),
+                                ("root cause inc 6818", "inc[-_ ]?6818"),
+                                ("INC6818 outage", "INC[-_ ]?6818"),
+                                ("ISO 27001 controls", "ISO[-_ ]?27001")):
+            self.assertIn(expected, main.identifier_pattern(query), query)
+        both = main.identifier_pattern("see KB-00042 and cve-2024-1234")
+        self.assertIn("KB[-_ ]?00042", both)
+        self.assertIn("cve[-_ ]?2024[-_ ]?1234", both)
+
+    def test_plain_language_has_no_identifier(self):
+        for query in ("travel per diem Sydney", "version 2 of the policy", "v2.3 release", "who owns the Q4 budget", ""):
+            self.assertIsNone(main.identifier_pattern(query), query)
+
+    def test_pattern_is_bounded_and_alphanumeric_only(self):
+        query = " ".join(f"AB-{1000 + i}" for i in range(20)) + " DROP-1; select 1"
+        pattern = main.identifier_pattern(query)
+        self.assertEqual(pattern.count("[-_ ]?"), 5)  # at most five identifiers
+        body = pattern.split("(")[2].split(")")[0]
+        self.assertRegex(body, r"^[A-Za-z0-9|\[\]\-_ ?]+$")
+
+    def test_disabled_by_weight(self):
+        with mock.patch.object(main, "RETRIEVAL_IDENTIFIER_WEIGHT", 0.0):
+            self.assertIsNone(main.identifier_pattern("INC-6818"))
+
+
 class FusionSql(unittest.TestCase):
     def test_ties_use_fractional_ranks_and_pool_limit(self):
         source = open(os.path.join(os.path.dirname(__file__), "..", "proxy", "main.py")).read()
         self.assertIn("count(*) OVER (PARTITION BY s.lexical_score)", source)
         self.assertIn("count(*) OVER (PARTITION BY s.vector_score)", source)
         self.assertIn("LIMIT $17", source)
+        self.assertIn("identifier_candidates", source)
+        self.assertIn("~* $18", source)
 
 
 if __name__ == "__main__":
