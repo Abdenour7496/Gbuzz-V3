@@ -41229,7 +41229,9 @@ Usage:
 Signs every request with BUZZ_PRIVATE_KEY (the agent's own Buzz key).
 Service: GCOR_KNOWLEDGE_URL (default ${DEFAULT_ORIGIN}).
 Contribute new knowledge in Buzz by replying to the supporting messages with:
-  !knowledge propose <Title> | <finding or decision>`;
+  !knowledge propose <Title> | <finding or decision>
+or turn a whole thread into a reviewed proposal by replying inside it with:
+  !knowledge synthesize thread`;
 function parseArgs(argv) {
   const out = { _: [] };
   for (let i = 0; i < argv.length; i++) {

@@ -224,6 +224,8 @@ jobs:
         run: docker compose -p gbuzz-integration -f docker-compose.integration.yml exec -T -e PYTHONPATH=/app gcor-proxy python /app/tests/integration/nostr_membership.py
       - name: Verify workspace ingestion and review lifecycle
         run: docker compose -p gbuzz-integration -f docker-compose.integration.yml exec -T -e PYTHONPATH=/app gcor-proxy python /app/tests/integration/workspace_lifecycle.py
+      - name: Thread synthesis
+        run: docker compose -p gbuzz-integration -f docker-compose.integration.yml exec -T -e PYTHONPATH=/app gcor-proxy python /app/tests/integration/thread_synthesis.py
       - name: Unanswered-question queue
         run: docker compose -p gbuzz-integration -f docker-compose.integration.yml exec -T -e PYTHONPATH=/app gcor-proxy python /app/tests/integration/unanswered_queue.py
       - name: Verify chat-native knowledge lifecycle
