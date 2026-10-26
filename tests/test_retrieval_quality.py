@@ -175,7 +175,7 @@ class IdentifierPattern(unittest.TestCase):
 
 class FusionSql(unittest.TestCase):
     def test_ties_use_fractional_ranks_and_pool_limit(self):
-        source = open(os.path.join(os.path.dirname(__file__), "..", "proxy", "main.py")).read()
+        source = open(main.__file__).read()  # works in the repository and inside the release image
         self.assertIn("count(*) OVER (PARTITION BY s.lexical_score)", source)
         self.assertIn("count(*) OVER (PARTITION BY s.vector_score)", source)
         self.assertIn("LIMIT $17", source)

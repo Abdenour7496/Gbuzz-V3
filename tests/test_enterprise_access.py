@@ -160,6 +160,8 @@ class AccessTest(unittest.IsolatedAsyncioTestCase):
 
     def test_production_compose_enforces_workload_boundary(self):
         root=Path(__file__).resolve().parents[1]
+        if not (root/'docker-compose.production.yml').exists():
+            self.skipTest('Compose files are not shipped in the release image; CI checks them on the repository')
         production=(root/'docker-compose.production.yml').read_text(encoding='utf-8')
         integration=(root/'docker-compose.integration.yml').read_text(encoding='utf-8')
         self.assertIn('REQUIRE_WORKLOAD_IDENTITY: "true"',production)

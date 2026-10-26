@@ -170,9 +170,10 @@ try {
         $gateEnv = @('-e', 'POSTGRES_USER=gate', '-e', 'POSTGRES_PASSWORD=gate', '-e', 'POSTGRES_DB=gate', '-e', 'MINIO_ENDPOINT=minio:9000',
             '-e', 'MINIO_ROOT_USER=gate', '-e', 'MINIO_ROOT_PASSWORD=gate', '-e', 'INGEST_WEBHOOK_SECRET=gate', '-e', 'GCOR_PUBLIC_ORIGIN=http://127.0.0.1:5011', '-e', 'PYTHONPATH=/app')
         Invoke-Native docker (@('run', '--rm', '--network', 'none') + $gateEnv + @($Tag, 'python', '-m', 'unittest',
-            'tests.test_enterprise_access', 'tests.test_buzz_chat', 'tests.test_buzz_synthesis', 'tests.test_production_safeguards',
+            'tests.test_enterprise_access', 'tests.test_buzz_chat', 'tests.test_buzz_synthesis',
             'tests.test_ingest_governance', 'tests.test_retrieval_quality', 'tests.test_unanswered'))
-        Ok 'Access, chat, synthesis, safeguards, governance, retrieval and unanswered-queue tests passed in the release image'
+        # tests.test_production_safeguards reads Compose files that are not in the image; CI runs it on the repository.
+        Ok 'Access, chat, synthesis, governance, retrieval and unanswered-queue tests passed in the release image'
     } catch {
         Warn "Build or gate failed: $($_.Exception.Message). Returning to $previousBranch; nothing was deployed."
         Invoke-Native git @('checkout', $previousBranch)
