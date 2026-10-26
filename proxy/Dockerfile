@@ -32,6 +32,7 @@ COPY scripts/evaluate-service-identity-matrix.py ./scripts/evaluate-service-iden
 COPY config/enterprise-assurance-slos.v1.json ./config/enterprise-assurance-slos.v1.json
 COPY scripts/check-knowledge-quality.py ./scripts/check-knowledge-quality.py
 COPY scripts/judge-answers.py ./scripts/judge-answers.py
+COPY scripts/draft-evaluation-set.py ./scripts/draft-evaluation-set.py
 COPY schemas ./schemas
 COPY tests ./tests
 
