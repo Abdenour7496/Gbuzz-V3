@@ -2,9 +2,10 @@
 // gcor-agent: the knowledge brain for Buzz agents.
 //   gcor-agent ask    --channel <uuid> "question"     grounded answer from approved knowledge
 //   gcor-agent search --channel <uuid> "query"        ranked approved excerpts + related graph nodes
+//   gcor-agent unanswered --channel <uuid>             open questions the knowledge base cannot answer yet
 //   gcor-agent whoami                                  show the agent identity this process signs with
 //   gcor-agent mcp                                     run as a stdio MCP server
-import { askKnowledge, searchKnowledge, parseSecretKey, publicKeyHex, KnowledgeError, DEFAULT_ORIGIN } from './client.mjs';
+import { askKnowledge, searchKnowledge, listUnanswered, parseSecretKey, publicKeyHex, KnowledgeError, DEFAULT_ORIGIN } from './client.mjs';
 
 const VERSION = '1.0.0';
 const HELP = `gcor-agent ${VERSION} — signed access to the GCOR knowledge brain
@@ -12,6 +13,7 @@ const HELP = `gcor-agent ${VERSION} — signed access to the GCOR knowledge brai
 Usage:
   gcor-agent ask    --channel <uuid> "<question>"
   gcor-agent search --channel <uuid> [--top-k N] "<query>"
+  gcor-agent unanswered --channel <uuid>
   gcor-agent whoami
   gcor-agent mcp
 
@@ -45,6 +47,11 @@ function renderSearch(r) {
   return lines.join('\n');
 }
 
+function renderUnanswered(r) {
+  if (!r.questions.length) return 'No open unanswered questions in this channel.';
+  return r.questions.map((q, i) => `${i + 1}. ${q.question}  (asked ${q.asked}x by ${q.people})`).join('\n');
+}
+
 async function runMcp() {
   const { McpServer } = await import('@modelcontextprotocol/sdk/server/mcp.js');
   const { StdioServerTransport } = await import('@modelcontextprotocol/sdk/server/stdio.js');
@@ -65,6 +72,10 @@ async function runMcp() {
     'Search approved knowledge for this channel and return ranked excerpts plus related graph concepts. Use for exploration when ask_knowledge is too narrow.',
     { channel_id: channel, query: z.string().min(1).max(4000), top_k: z.number().int().min(1).max(20).optional() },
     wrap(a => searchKnowledge({ channelId: a.channel_id, query: a.query, topK: a.top_k })));
+  server.tool('unanswered_questions',
+    'List open questions people and agents in this channel asked that approved knowledge could not answer. Pick ones you can research, then propose the finding in Buzz with "!knowledge propose <Title> | <finding>" replying to the supporting messages, so a human can review it.',
+    { channel_id: channel, limit: z.number().int().min(1).max(100).optional() },
+    wrap(a => listUnanswered({ channelId: a.channel_id, limit: a.limit })));
   await server.connect(new StdioServerTransport());
 }
 
@@ -81,8 +92,10 @@ async function main() {
   let result;
   if (command === 'ask') result = await askKnowledge({ channelId: args.channel, question: text });
   else if (command === 'search') result = await searchKnowledge({ channelId: args.channel, query: text, topK: args.topK });
+  else if (command === 'unanswered') result = await listUnanswered({ channelId: args.channel });
   else { console.error(`Unknown command: ${command}\n\n${HELP}`); process.exitCode = 2; return; }
-  console.log(args.json ? JSON.stringify(result, null, 2) : (command === 'ask' ? renderAsk(result) : renderSearch(result)));
+  const render = { ask: renderAsk, search: renderSearch, unanswered: renderUnanswered }[command];
+  console.log(args.json ? JSON.stringify(result, null, 2) : render(result));
 }
 
 main().catch(e => { console.error(e instanceof KnowledgeError ? e.message : (e?.stack || String(e))); process.exitCode = 1; });

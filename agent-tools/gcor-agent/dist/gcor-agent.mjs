@@ -41199,6 +41199,21 @@ async function searchKnowledge({ channelId, query, topK = 6 }, options) {
   }));
   return { results: chunks, related };
 }
+async function listUnanswered({ channelId, limit = 20 }, options) {
+  const channel = requireChannel(channelId);
+  const rows = await signedPost("/api/workspace/unanswered", {
+    channel_id: channel,
+    status: "open",
+    limit: Math.max(1, Math.min(100, Number(limit) || 20))
+  }, options);
+  return { questions: (Array.isArray(rows) ? rows : []).map((q) => ({
+    id: q.id,
+    question: q.question,
+    asked: q.asked_count,
+    people: q.distinct_askers,
+    last_asked: q.last_asked_at
+  })) };
+}
 
 // src/main.mjs
 var VERSION = "1.0.0";
@@ -41207,6 +41222,7 @@ var HELP = `gcor-agent ${VERSION} \u2014 signed access to the GCOR knowledge bra
 Usage:
   gcor-agent ask    --channel <uuid> "<question>"
   gcor-agent search --channel <uuid> [--top-k N] "<query>"
+  gcor-agent unanswered --channel <uuid>
   gcor-agent whoami
   gcor-agent mcp
 
@@ -41242,6 +41258,10 @@ function renderSearch(r) {
   if (r.related.length) lines.push("\nRelated:", ...r.related.map((n) => `- [${n.type}] ${n.label}`));
   return lines.join("\n");
 }
+function renderUnanswered(r) {
+  if (!r.questions.length) return "No open unanswered questions in this channel.";
+  return r.questions.map((q, i) => `${i + 1}. ${q.question}  (asked ${q.asked}x by ${q.people})`).join("\n");
+}
 async function runMcp() {
   const { McpServer: McpServer2 } = await Promise.resolve().then(() => (init_mcp(), mcp_exports));
   const { StdioServerTransport: StdioServerTransport2 } = await Promise.resolve().then(() => (init_stdio2(), stdio_exports));
@@ -41268,6 +41288,12 @@ async function runMcp() {
     { channel_id: channel, query: z2.string().min(1).max(4e3), top_k: z2.number().int().min(1).max(20).optional() },
     wrap((a) => searchKnowledge({ channelId: a.channel_id, query: a.query, topK: a.top_k }))
   );
+  server.tool(
+    "unanswered_questions",
+    'List open questions people and agents in this channel asked that approved knowledge could not answer. Pick ones you can research, then propose the finding in Buzz with "!knowledge propose <Title> | <finding>" replying to the supporting messages, so a human can review it.',
+    { channel_id: channel, limit: z2.number().int().min(1).max(100).optional() },
+    wrap((a) => listUnanswered({ channelId: a.channel_id, limit: a.limit }))
+  );
   await server.connect(new StdioServerTransport2());
 }
 async function main() {
@@ -41286,6 +41312,7 @@ async function main() {
   let result;
   if (command === "ask") result = await askKnowledge({ channelId: args.channel, question: text });
   else if (command === "search") result = await searchKnowledge({ channelId: args.channel, query: text, topK: args.topK });
+  else if (command === "unanswered") result = await listUnanswered({ channelId: args.channel });
   else {
     console.error(`Unknown command: ${command}
 
@@ -41293,7 +41320,8 @@ ${HELP}`);
     process.exitCode = 2;
     return;
   }
-  console.log(args.json ? JSON.stringify(result, null, 2) : command === "ask" ? renderAsk(result) : renderSearch(result));
+  const render = { ask: renderAsk, search: renderSearch, unanswered: renderUnanswered }[command];
+  console.log(args.json ? JSON.stringify(result, null, 2) : render(result));
 }
 main().catch((e) => {
   console.error(e instanceof KnowledgeError ? e.message : e?.stack || String(e));

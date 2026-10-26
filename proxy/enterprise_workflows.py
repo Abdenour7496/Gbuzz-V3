@@ -43,6 +43,7 @@ class Submission(Channel):
     title: str=Field(min_length=1,max_length=300)
     text: str=Field(min_length=1,max_length=500000)
     source_uri: str | None=Field(default=None,max_length=2000)
+    answers_question_id: UUID | None=None  # unanswered question this submission answers
 
 
 class Review(Document):
@@ -161,6 +162,7 @@ async def feedback(payload: Feedback,request: Request):
 async def submit(payload: Submission,request: Request):
     p=identity(contributor=True)
     data=payload.model_dump(mode='json')|{'access_level':p.access_level}
+    if data.get('answers_question_id') is None: data.pop('answers_question_id',None)  # keeps earlier request digests stable
     digest=hashlib.sha256(json.dumps(data,sort_keys=True).encode()).hexdigest()
     async with request.app.state.pool.acquire() as connection:
         async with connection.transaction():
@@ -242,6 +244,12 @@ async def process_one(app):
                 channel_name=None,channel_id=row['channel_id'],event_id=str(row['id']),event_kind='knowledge.propose',event_timestamp=None,
                 author_pubkey=row['actor'],file_url=None,file_name='proposal.txt',metadata={'knowledge_state':'proposed','knowledge_owner':row['actor'],'ingestion_job_id':str(row['id'])},preserve_existing=True)
         if result.get('quarantined'): raise RuntimeError('Ingestion was quarantined')
+        if data.get('answers_question_id') and result.get('document_id'):
+            try:
+                import unanswered
+                await unanswered.link_answer(pool,data['answers_question_id'],row['channel_id'],result['document_id'],row['actor'])
+            except Exception:
+                pass  # linking is a convenience; the proposal itself was ingested
         await pool.execute("UPDATE gcor.ingestion_jobs SET status='completed',result=$3::jsonb,error=NULL,lease_until=NULL,updated_at=now() WHERE id=$1 AND lease_id=$2",row['id'],lease,json.dumps(result,default=str))
     except Exception as error:
         permanent=isinstance(error,PermissionError) or (isinstance(error,HTTPException) and error.status_code<500)

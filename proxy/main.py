@@ -39,6 +39,7 @@ from document_parsing import extract as parse_document
 from parser_client import extract as parse_isolated_document
 from graph_retrieval import candidates as graph_candidates
 import reranker
+import unanswered
 from audit_pack import router as audit_pack_router
 
 logger = logging.getLogger("gcor.proxy")
@@ -1221,6 +1222,7 @@ async def lifespan(app: FastAPI):
         try: publisher=asyncio.create_task(run_publisher(app.state.pool, app.state.governance_s3))
         finally: current_principal.reset(token)
     app.state.workflows_available = bool(await app.state.pool.fetchval("SELECT to_regclass('gcor.ingestion_jobs')"))
+    app.state.unanswered_available = bool(await app.state.pool.fetchval("SELECT to_regclass('gcor.unanswered_questions')"))
     job_worker = None
     if app.state.workflows_available and os.getenv('GCOR_ACCESS_MODE','legacy')=='legacy' and os.getenv('GCOR_INGESTION_WORKER','true')=='true':
         token=current_principal.set(Principal('ingestion-worker','','',role='service',workload=True,operations=frozenset({'ingest'})))
@@ -1243,6 +1245,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="gcor-proxy", version="0.1.0", lifespan=lifespan)
 app.include_router(workspace_router)
+app.include_router(unanswered.router)
 
 
 @app.exception_handler(asyncpg.PostgresConnectionError)
@@ -2466,6 +2469,8 @@ async def ask(
         citations=[];normalized=[];graph_nodes=[];matches=[]
     else:
         await verify_release_authorization(request, citations)
+        if not matches and getattr(request.app.state, "unanswered_available", False):
+            await unanswered.record(request.app.state.pool, query)
     REQUEST_DURATION.observe(time.perf_counter() - started)
     return {
         "answer": answer,
@@ -2515,6 +2520,8 @@ async def ask_reply(
         citations=[];graph_nodes=[];matches=[]
     else:
         await verify_release_authorization(request, citations)
+        if not matches and getattr(request.app.state, "unanswered_available", False):
+            await unanswered.record(request.app.state.pool, query)
     reply_text = compose_chat_reply(
         query,
         citations,

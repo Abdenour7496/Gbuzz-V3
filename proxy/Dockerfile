@@ -16,6 +16,7 @@ COPY proxy/document_parsing.py .
 COPY proxy/parser_client.py .
 COPY proxy/graph_retrieval.py .
 COPY proxy/reranker.py .
+COPY proxy/unanswered.py .
 COPY proxy/audit_pack.py .
 COPY proxy/buzz_chat.py .
 COPY proxy/buzz_synthesis.py .
