@@ -241,7 +241,11 @@ try {
 
         Step 'Build the relationship projector and test it inside its image (no network)'
         Invoke-Native docker ($compose.Args + @('build', $projectorService))
-        Invoke-Native docker @('run', '--rm', '--network', 'none', "gbuzz-$projectorService", 'python', '-m', 'unittest', 'test_main')
+        # test_migration_preserves_fail_closed_interactive_edge_policy reads repository files that are not in
+        # the image; CI runs it on the repository. Run the rest here.
+        Invoke-Native docker @('run', '--rm', '--network', 'none', "gbuzz-$projectorService", 'python', '-m', 'unittest', 'test_main',
+            '-k', 'deterministic', '-k', 'valid_projection', '-k', 'unknown_evidence', '-k', 'unbounded', '-k', 'model_response',
+            '-k', 'chunk_snapshot', '-k', 'publication_rechecks')
         Ok 'Relationship projector image built; its unit tests passed'
     } catch {
         Warn "Build or gate failed: $($_.Exception.Message). Returning to $previousBranch; nothing was deployed."
