@@ -43,11 +43,16 @@ def scripted_model(request: httpx.Request) -> httpx.Response:
 
 async def make_document(admin, channel, title, approved_at, texts, state="approved"):
     document = uuid4()
+    # Chat-derived knowledge cites Buzz relay events; checking them reads public.events, which the
+    # projector role must not be able to read directly.
+    event = secrets.token_bytes(32)
+    await admin.execute("INSERT INTO public.events(id,channel_id) VALUES($1,$2::uuid)", event, channel)
     await admin.execute(
         """INSERT INTO gcor.documents(id,content_sha256,identity_sha256,title,object_key,access_level,metadata)
            VALUES($1,$2,$3,$4,'facts-test','private',$5::jsonb)""",
         document, secrets.token_hex(32), secrets.token_hex(32), title,
-        json.dumps({"channel_id": channel, "knowledge_state": state, "knowledge_approved_at": approved_at}),
+        json.dumps({"channel_id": channel, "knowledge_state": state, "knowledge_approved_at": approved_at,
+                    "buzz_evidence_ids": [event.hex()]}),
     )
     nodes = []
     for ordinal, text in enumerate(texts):
@@ -126,7 +131,11 @@ async def main():
     channel, other_channel = str(uuid4()), str(uuid4())
     owner = uuid4()
     try:
+        await admin.execute("""CREATE TABLE IF NOT EXISTS public.events(id bytea PRIMARY KEY, pubkey bytea, kind integer, tags jsonb,
+            content text, sig bytea, created_at timestamptz, received_at timestamptz DEFAULT now(), channel_id uuid, deleted_at timestamptz)""")
         async with pool.acquire() as connection:
+            assert not await connection.fetchval("SELECT has_table_privilege('public.events','SELECT')"), \
+                "the projector role must not read raw Buzz events"
             async with connection.transaction():
                 await projector.set_workload(connection)
                 projector.FACTS_STATE["available"] = await temporal_facts.available(connection)
