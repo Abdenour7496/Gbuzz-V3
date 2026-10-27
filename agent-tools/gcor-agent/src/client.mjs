@@ -128,3 +128,19 @@ export async function listUnanswered({ channelId, limit = 20 }, options) {
   return { questions: (Array.isArray(rows) ? rows : []).map(q => ({ id: q.id, question: q.question,
     asked: q.asked_count, people: q.distinct_askers, last_asked: q.last_asked_at })) };
 }
+
+// How facts about a subject changed over time, from approved knowledge in this channel.
+// view: 'timeline' (every value with its validity window) or 'true_at' (only what was true at asOf).
+export async function factHistory({ channelId, subject, predicate, view = 'timeline', asOf, knownAt, limit = 50 }, options) {
+  const channel = requireChannel(channelId);
+  if (!subject || !subject.trim()) throw new KnowledgeError('subject is required');
+  if (view !== 'timeline' && view !== 'true_at') throw new KnowledgeError('view must be timeline or true_at');
+  const result = await signedPost('/api/facts/history', { channel_id: channel, subject: subject.trim(),
+    predicate: predicate || null, view, as_of: asOf || null, known_at: knownAt || null,
+    limit: Math.max(1, Math.min(200, Number(limit) || 50)) }, options);
+  const facts = (result?.facts || []).map(f => ({ subject: f.subject, predicate: f.predicate, value: f.object,
+    fact: f.fact, from: f.valid_at, until: f.invalid_at, status: f.status, true_now: Boolean(f.is_true),
+    superseded_by: f.superseded_by ? f.superseded_by.object : null,
+    source: f.source ? { title: f.source.title, document_id: f.source.document_id } : null }));
+  return { subject: result?.subject ?? subject, as_of: result?.as_of ?? null, known_at: result?.known_at ?? null, facts };
+}

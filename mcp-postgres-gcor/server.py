@@ -77,6 +77,27 @@ async def graph_expand(
 
 
 @mcp.tool()
+async def fact_history(
+    subject: str,
+    channel_id: str,
+    predicate: str | None = None,
+    view: str = "timeline",
+    as_of: str | None = None,
+    known_at: str | None = None,
+    access_level: str = "public",
+    limit: int = 100,
+) -> dict[str, Any]:
+    """How facts about a subject changed over time (owner, status, version, ...), from approved knowledge.
+    view="timeline" lists every value with its validity window and what superseded it; view="true_at"
+    returns only what was true at as_of (ISO time, default now). known_at (ISO time) answers from what
+    the knowledge base believed at that moment instead of the current belief."""
+    return await proxy_post("/api/facts/history", {
+        "subject": subject, "channel_id": channel_id, "predicate": predicate, "view": view,
+        "as_of": as_of, "known_at": known_at, "access_level": access_level, "limit": limit,
+    })
+
+
+@mcp.tool()
 async def ask_knowledge(
     query: str,
     top_k: int = 6,

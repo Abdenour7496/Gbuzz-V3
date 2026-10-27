@@ -41214,6 +41214,33 @@ async function listUnanswered({ channelId, limit = 20 }, options) {
     last_asked: q.last_asked_at
   })) };
 }
+async function factHistory({ channelId, subject, predicate, view = "timeline", asOf, knownAt, limit = 50 }, options) {
+  const channel = requireChannel(channelId);
+  if (!subject || !subject.trim()) throw new KnowledgeError("subject is required");
+  if (view !== "timeline" && view !== "true_at") throw new KnowledgeError("view must be timeline or true_at");
+  const result = await signedPost("/api/facts/history", {
+    channel_id: channel,
+    subject: subject.trim(),
+    predicate: predicate || null,
+    view,
+    as_of: asOf || null,
+    known_at: knownAt || null,
+    limit: Math.max(1, Math.min(200, Number(limit) || 50))
+  }, options);
+  const facts = (result?.facts || []).map((f) => ({
+    subject: f.subject,
+    predicate: f.predicate,
+    value: f.object,
+    fact: f.fact,
+    from: f.valid_at,
+    until: f.invalid_at,
+    status: f.status,
+    true_now: Boolean(f.is_true),
+    superseded_by: f.superseded_by ? f.superseded_by.object : null,
+    source: f.source ? { title: f.source.title, document_id: f.source.document_id } : null
+  }));
+  return { subject: result?.subject ?? subject, as_of: result?.as_of ?? null, known_at: result?.known_at ?? null, facts };
+}
 
 // src/main.mjs
 var VERSION = "1.0.0";
@@ -41223,6 +41250,7 @@ Usage:
   gcor-agent ask    --channel <uuid> "<question>"
   gcor-agent search --channel <uuid> [--top-k N] "<query>"
   gcor-agent unanswered --channel <uuid>
+  gcor-agent facts  --channel <uuid> [--as-of <ISO time>] [--known-at <ISO time>] "<subject>"
   gcor-agent whoami
   gcor-agent mcp
 
@@ -41238,6 +41266,8 @@ function parseArgs(argv) {
     const a = argv[i];
     if (a === "--channel" || a === "-c") out.channel = argv[++i];
     else if (a === "--top-k") out.topK = Number(argv[++i]);
+    else if (a === "--as-of") out.asOf = argv[++i];
+    else if (a === "--known-at") out.knownAt = argv[++i];
     else if (a === "--json") out.json = true;
     else if (a === "-h" || a === "--help") out.help = true;
     else out._.push(a);
@@ -41263,6 +41293,14 @@ function renderSearch(r) {
 function renderUnanswered(r) {
   if (!r.questions.length) return "No open unanswered questions in this channel.";
   return r.questions.map((q, i) => `${i + 1}. ${q.question}  (asked ${q.asked}x by ${q.people})`).join("\n");
+}
+function renderFacts(r) {
+  if (!r.facts.length) return `No approved facts recorded about "${r.subject}".`;
+  return r.facts.map((f) => {
+    const period = `${f.from ? f.from.slice(0, 10) : "(unknown start)"} -> ${f.until ? f.until.slice(0, 10) : "now"}`;
+    const note = f.status === "superseded" && f.superseded_by ? `, superseded by ${f.superseded_by}` : f.status === "active" ? "" : `, ${f.status}`;
+    return `${f.true_now ? "*" : " "} ${f.subject} ${f.predicate} ${f.value}  [${period}${note}]${f.source ? `  (${f.source.title})` : ""}`;
+  }).join("\n");
 }
 async function runMcp() {
   const { McpServer: McpServer2 } = await Promise.resolve().then(() => (init_mcp(), mcp_exports));
@@ -41296,6 +41334,19 @@ async function runMcp() {
     { channel_id: channel, limit: z2.number().int().min(1).max(100).optional() },
     wrap((a) => listUnanswered({ channelId: a.channel_id, limit: a.limit }))
   );
+  server.tool(
+    "fact_history",
+    'How approved facts about a subject changed over time (owner, status, version, decision...). Use when a question is about who/what is current or was true at a date. view "timeline" lists every value with its validity window and what superseded it; view "true_at" returns only what was true at as_of. known_at answers from what the knowledge base believed at that moment.',
+    {
+      channel_id: channel,
+      subject: z2.string().min(1).max(160),
+      predicate: z2.string().max(48).optional(),
+      view: z2.enum(["timeline", "true_at"]).optional(),
+      as_of: z2.string().max(40).optional(),
+      known_at: z2.string().max(40).optional()
+    },
+    wrap((a) => factHistory({ channelId: a.channel_id, subject: a.subject, predicate: a.predicate, view: a.view, asOf: a.as_of, knownAt: a.known_at }))
+  );
   await server.connect(new StdioServerTransport2());
 }
 async function main() {
@@ -41315,6 +41366,13 @@ async function main() {
   if (command === "ask") result = await askKnowledge({ channelId: args.channel, question: text });
   else if (command === "search") result = await searchKnowledge({ channelId: args.channel, query: text, topK: args.topK });
   else if (command === "unanswered") result = await listUnanswered({ channelId: args.channel });
+  else if (command === "facts") result = await factHistory({
+    channelId: args.channel,
+    subject: text,
+    asOf: args.asOf,
+    knownAt: args.knownAt,
+    view: args.asOf ? "true_at" : "timeline"
+  });
   else {
     console.error(`Unknown command: ${command}
 
@@ -41322,7 +41380,7 @@ ${HELP}`);
     process.exitCode = 2;
     return;
   }
-  const render = { ask: renderAsk, search: renderSearch, unanswered: renderUnanswered }[command];
+  const render = { ask: renderAsk, search: renderSearch, unanswered: renderUnanswered, facts: renderFacts }[command];
   console.log(args.json ? JSON.stringify(result, null, 2) : render(result));
 }
 main().catch((e) => {

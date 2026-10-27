@@ -110,6 +110,10 @@ jobs:
             requirements: projector/requirements.lock
             test: relationship-projector/test_main.py
             pythonpath: relationship-projector
+          - component: relationship-temporal-facts
+            requirements: projector/requirements.lock
+            test: relationship-projector/test_temporal_facts.py
+            pythonpath: relationship-projector
           - component: mcp-governance
             requirements: mcp-postgres-gcor/requirements.lock
             test: tests/test_mcp_governance.py
@@ -129,7 +133,7 @@ jobs:
         if: matrix.component == 'proxy'
         env:
           PYTHONPATH: proxy
-        run: python -m unittest -v tests/test_ingest_governance.py tests/test_retrieval_quality.py tests/test_unanswered.py tests/test_judge_answers.py tests/test_draft_evaluation.py tests/test_production_safeguards.py tests/test_governance_egress.py tests/test_enterprise_access.py tests/test_enterprise_workflows.py tests/test_evaluation.py tests/test_graph_retrieval.py tests/test_buzz_chat.py tests/test_buzz_synthesis.py tests/test_buzz_cards.py tests/test_backup_evidence.py tests/test_minio_references.py tests/test_reliability_automation.py tests/test_governance_control_package.py
+        run: python -m unittest -v tests/test_ingest_governance.py tests/test_retrieval_quality.py tests/test_unanswered.py tests/test_judge_answers.py tests/test_draft_evaluation.py tests/test_production_safeguards.py tests/test_governance_egress.py tests/test_enterprise_access.py tests/test_enterprise_workflows.py tests/test_evaluation.py tests/test_graph_retrieval.py tests/test_buzz_chat.py tests/test_buzz_synthesis.py tests/test_buzz_cards.py tests/test_backup_evidence.py tests/test_minio_references.py tests/test_reliability_automation.py tests/test_governance_control_package.py tests/test_temporal_facts.py
 
   recovery-tests:
     name: Python tests (recovery-controller)
@@ -216,6 +220,8 @@ jobs:
         run: |
           docker compose -p gbuzz-integration -f docker-compose.integration.yml --profile relationship-projection run --rm relationship-migrate
           docker compose -p gbuzz-integration -f docker-compose.integration.yml exec -T -e PYTHONPATH=/app gcor-proxy python /app/tests/integration/relationship_rls.py
+      - name: Verify bi-temporal facts projection (supersede, history, retraction, isolation)
+        run: docker compose -p gbuzz-integration -f docker-compose.integration.yml --profile relationship-projection run --rm --no-deps relationship-facts-check
       - name: Verify atomic migrations and immutable history
         run: docker compose -p gbuzz-integration -f docker-compose.integration.yml run --rm --no-deps -v "$PWD/tests/integration:/checks:ro" migrate /bin/sh /checks/migration_runner.sh
       - name: Verify enterprise boundaries and lexical fallback
@@ -228,6 +234,8 @@ jobs:
         run: docker compose -p gbuzz-integration -f docker-compose.integration.yml exec -T -e PYTHONPATH=/app gcor-proxy python /app/tests/integration/thread_synthesis.py
       - name: Unanswered-question queue
         run: docker compose -p gbuzz-integration -f docker-compose.integration.yml exec -T -e PYTHONPATH=/app gcor-proxy python /app/tests/integration/unanswered_queue.py
+      - name: Temporal facts read path (scope, as-of, known-at, kill switch)
+        run: docker compose -p gbuzz-integration -f docker-compose.integration.yml exec -T -e PYTHONPATH=/app gcor-proxy python /app/tests/integration/temporal_facts_retrieval.py
       - name: Verify chat-native knowledge lifecycle
         run: docker compose -p gbuzz-integration -f docker-compose.integration.yml exec -T -e PYTHONPATH=/app gcor-proxy python /app/tests/integration/buzz_chat_lifecycle.py
       - name: Verify real Buzz relay knowledge loop

@@ -40,6 +40,7 @@ from parser_client import extract as parse_isolated_document
 from graph_retrieval import candidates as graph_candidates
 import reranker
 import unanswered
+import temporal_facts
 from audit_pack import router as audit_pack_router
 
 logger = logging.getLogger("gcor.proxy")
@@ -1223,6 +1224,7 @@ async def lifespan(app: FastAPI):
         finally: current_principal.reset(token)
     app.state.workflows_available = bool(await app.state.pool.fetchval("SELECT to_regclass('gcor.ingestion_jobs')"))
     app.state.unanswered_available = bool(await app.state.pool.fetchval("SELECT to_regclass('gcor.unanswered_questions')"))
+    app.state.temporal_facts_available = bool(await app.state.pool.fetchval("SELECT to_regclass('gcor.facts')"))
     job_worker = None
     if app.state.workflows_available and os.getenv('GCOR_ACCESS_MODE','legacy')=='legacy' and os.getenv('GCOR_INGESTION_WORKER','true')=='true':
         token=current_principal.set(Principal('ingestion-worker','','',role='service',workload=True,operations=frozenset({'ingest'})))
@@ -2407,12 +2409,30 @@ async def retrieve(
         approved_only=False,
         prefer_recent_approved=False,
     )
+    facts = []
+    if temporal_facts.available(request):
+        facts = await temporal_facts.for_retrieval(request, matches, payload.query, temporal_facts.scope_for(
+            access_level=payload.access_level, channel_id=None, channel_name=None,
+            agent_id=payload.agent_id, approved_only=False))
     REQUEST_DURATION.observe(time.perf_counter() - started)
     return {
         "chunks": [dict(row) | {"id": str(row["id"]), "node_id": str(row["node_id"]), "document_id": str(row["document_id"])} for row in matches],
         "graph_nodes": [dict(row) | {"id": str(row["id"])} for row in graph_nodes],
         "reflection": "graph" if graph_nodes else ("chunks" if matches else "empty"),
+        "facts": facts,
     }
+
+
+@app.post("/api/facts/history")
+async def facts_history(
+    payload: temporal_facts.FactHistoryRequest,
+    request: Request,
+    x_gcor_webhook_secret: Annotated[str | None, Header()] = None,
+):
+    """How a subject's facts changed over time: every value with its validity window (view=timeline),
+    or only what was true at as_of (view=true_at); known_at answers from what was believed then."""
+    verify_stack_api_secret(x_gcor_webhook_secret)
+    return await temporal_facts.history(request, payload)
 
 
 async def evidence_still_current(request, evidence, approved_only):
@@ -2471,6 +2491,11 @@ async def ask(
         await verify_release_authorization(request, citations)
         if not matches and getattr(request.app.state, "unanswered_available", False):
             await unanswered.record(request.app.state.pool, query)
+    facts = []
+    if matches and temporal_facts.available(request):
+        facts = await temporal_facts.for_retrieval(request, matches, query, temporal_facts.scope_for(
+            access_level=payload.access_level, channel_id=payload.channel_id, channel_name=payload.channel_name,
+            agent_id=payload.agent_id, approved_only=payload.approved_only))
     REQUEST_DURATION.observe(time.perf_counter() - started)
     return {
         "answer": answer,
@@ -2478,6 +2503,7 @@ async def ask(
         "chunks": normalized,
         "graph_nodes": [dict(row) | {"id": str(row["id"])} for row in graph_nodes],
         "reflection": "graph" if graph_nodes else ("chunks" if matches else "empty"),
+        "facts": facts,
     }
 
 

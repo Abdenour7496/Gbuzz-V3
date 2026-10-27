@@ -17,6 +17,13 @@ class McpGovernanceTest(unittest.IsolatedAsyncioTestCase):
             await server.transition_knowledge("archived", target_document_id="document", idempotency_key="archive-1")
             self.assertEqual("archive-1", post.call_args.kwargs["idempotency_key"])
 
+    async def test_fact_history_tool_posts_to_the_scoped_history_endpoint(self):
+        with patch.object(server, "proxy_post", AsyncMock(return_value={"facts": []})) as post:
+            self.assertEqual({"facts": []}, await server.fact_history("Release process", channel_id="c", view="true_at", as_of="2026-05-01"))
+        path, payload = post.call_args.args
+        self.assertEqual("/api/facts/history", path)
+        self.assertEqual(("Release process", "c", "true_at", "2026-05-01"), (payload["subject"], payload["channel_id"], payload["view"], payload["as_of"]))
+
     async def test_outbox_tool_reads_authenticated_proxy_helper(self):
         with patch.object(server, "proxy_get", AsyncMock(return_value={"pending": 1})) as get:
             self.assertEqual({"pending": 1}, await server.get_governance_outbox())

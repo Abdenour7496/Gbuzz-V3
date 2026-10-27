@@ -11,6 +11,7 @@ backups/
 *.zip
 *.sql
 !migrations/*.sql
+!relationship-projector/migrations/*.sql
 release-evidence-*.md
 !docs/release-evidence-*.md
 observability/alertmanager.production.yml

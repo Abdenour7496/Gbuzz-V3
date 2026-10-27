@@ -3,9 +3,10 @@
 //   gcor-agent ask    --channel <uuid> "question"     grounded answer from approved knowledge
 //   gcor-agent search --channel <uuid> "query"        ranked approved excerpts + related graph nodes
 //   gcor-agent unanswered --channel <uuid>             open questions the knowledge base cannot answer yet
+//   gcor-agent facts  --channel <uuid> [--as-of T] "subject"  how a subject's facts changed over time
 //   gcor-agent whoami                                  show the agent identity this process signs with
 //   gcor-agent mcp                                     run as a stdio MCP server
-import { askKnowledge, searchKnowledge, listUnanswered, parseSecretKey, publicKeyHex, KnowledgeError, DEFAULT_ORIGIN } from './client.mjs';
+import { askKnowledge, searchKnowledge, listUnanswered, factHistory, parseSecretKey, publicKeyHex, KnowledgeError, DEFAULT_ORIGIN } from './client.mjs';
 
 const VERSION = '1.0.0';
 const HELP = `gcor-agent ${VERSION} — signed access to the GCOR knowledge brain
@@ -14,6 +15,7 @@ Usage:
   gcor-agent ask    --channel <uuid> "<question>"
   gcor-agent search --channel <uuid> [--top-k N] "<query>"
   gcor-agent unanswered --channel <uuid>
+  gcor-agent facts  --channel <uuid> [--as-of <ISO time>] [--known-at <ISO time>] "<subject>"
   gcor-agent whoami
   gcor-agent mcp
 
@@ -30,6 +32,8 @@ function parseArgs(argv) {
     const a = argv[i];
     if (a === '--channel' || a === '-c') out.channel = argv[++i];
     else if (a === '--top-k') out.topK = Number(argv[++i]);
+    else if (a === '--as-of') out.asOf = argv[++i];
+    else if (a === '--known-at') out.knownAt = argv[++i];
     else if (a === '--json') out.json = true;
     else if (a === '-h' || a === '--help') out.help = true;
     else out._.push(a);
@@ -52,6 +56,16 @@ function renderSearch(r) {
 function renderUnanswered(r) {
   if (!r.questions.length) return 'No open unanswered questions in this channel.';
   return r.questions.map((q, i) => `${i + 1}. ${q.question}  (asked ${q.asked}x by ${q.people})`).join('\n');
+}
+
+function renderFacts(r) {
+  if (!r.facts.length) return `No approved facts recorded about "${r.subject}".`;
+  return r.facts.map(f => {
+    const period = `${f.from ? f.from.slice(0, 10) : '(unknown start)'} -> ${f.until ? f.until.slice(0, 10) : 'now'}`;
+    const note = f.status === 'superseded' && f.superseded_by ? `, superseded by ${f.superseded_by}`
+      : (f.status === 'active' ? '' : `, ${f.status}`);
+    return `${f.true_now ? '*' : ' '} ${f.subject} ${f.predicate} ${f.value}  [${period}${note}]${f.source ? `  (${f.source.title})` : ''}`;
+  }).join('\n');
 }
 
 async function runMcp() {
@@ -78,6 +92,11 @@ async function runMcp() {
     'List open questions people and agents in this channel asked that approved knowledge could not answer. Pick ones you can research, then propose the finding in Buzz with "!knowledge propose <Title> | <finding>" replying to the supporting messages, so a human can review it.',
     { channel_id: channel, limit: z.number().int().min(1).max(100).optional() },
     wrap(a => listUnanswered({ channelId: a.channel_id, limit: a.limit })));
+  server.tool('fact_history',
+    'How approved facts about a subject changed over time (owner, status, version, decision...). Use when a question is about who/what is current or was true at a date. view "timeline" lists every value with its validity window and what superseded it; view "true_at" returns only what was true at as_of. known_at answers from what the knowledge base believed at that moment.',
+    { channel_id: channel, subject: z.string().min(1).max(160), predicate: z.string().max(48).optional(),
+      view: z.enum(['timeline', 'true_at']).optional(), as_of: z.string().max(40).optional(), known_at: z.string().max(40).optional() },
+    wrap(a => factHistory({ channelId: a.channel_id, subject: a.subject, predicate: a.predicate, view: a.view, asOf: a.as_of, knownAt: a.known_at })));
   await server.connect(new StdioServerTransport());
 }
 
@@ -95,8 +114,10 @@ async function main() {
   if (command === 'ask') result = await askKnowledge({ channelId: args.channel, question: text });
   else if (command === 'search') result = await searchKnowledge({ channelId: args.channel, query: text, topK: args.topK });
   else if (command === 'unanswered') result = await listUnanswered({ channelId: args.channel });
+  else if (command === 'facts') result = await factHistory({ channelId: args.channel, subject: text, asOf: args.asOf, knownAt: args.knownAt,
+    view: args.asOf ? 'true_at' : 'timeline' });
   else { console.error(`Unknown command: ${command}\n\n${HELP}`); process.exitCode = 2; return; }
-  const render = { ask: renderAsk, search: renderSearch, unanswered: renderUnanswered }[command];
+  const render = { ask: renderAsk, search: renderSearch, unanswered: renderUnanswered, facts: renderFacts }[command];
   console.log(args.json ? JSON.stringify(result, null, 2) : render(result));
 }
 
