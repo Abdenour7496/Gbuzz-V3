@@ -1,6 +1,6 @@
 # Bi-temporal facts in Postgres (2026-10-27)
 
-Knowledge that tracks time, without Graphiti or FalkorDB. Branch `feat/temporal-facts-20261027`, based on
+Knowledge that tracks time, without Graphiti or FalkorDB. PR #18, branch `feat/temporal-facts-20261027`, based on
 `feat/knowledge-loop-sprint-20261026` (PR #17). Not deployed; the lab is untouched.
 
 ## What it does
