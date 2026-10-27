@@ -200,13 +200,8 @@ try {
     $record | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $evidence 'rollback.json') -Encoding utf8
     Ok "Rollback record: $evidence\rollback.json"
 
-    if (-not $SkipBackup) {
-        Step 'Verified encrypted backup'
-        & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'backup-stack.ps1')
-        if ($LASTEXITCODE -ne 0) { throw 'Backup failed; nothing was changed.' }
-        Ok 'Backup completed'
-    } else { Warn 'Backup skipped by request' }
-
+    # Before the backup: backup-stack.ps1 renders the startup plan, which on the release branch
+    # includes the relationships overlay and therefore needs these values.
     Step 'Relationship projector database login'
     if (-not (Get-DotEnvValue 'GCOR_RELATIONSHIP_DB_USER')) { Set-DotEnvValue 'GCOR_RELATIONSHIP_DB_USER' 'gcor_relationship_runtime' }
     if (-not (Get-DotEnvValue 'GCOR_RELATIONSHIP_DB_PASSWORD')) {
@@ -216,6 +211,13 @@ try {
     } else { Ok 'Relationship projector login already configured in .env' }
     $relationshipUser = Get-DotEnvValue 'GCOR_RELATIONSHIP_DB_USER'
     if ($relationshipUser -notmatch '^[a-z_][a-z0-9_]{0,62}$') { throw "GCOR_RELATIONSHIP_DB_USER must be a plain lower-case identifier: $relationshipUser" }
+
+    if (-not $SkipBackup) {
+        Step 'Verified encrypted backup'
+        & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'backup-stack.ps1')
+        if ($LASTEXITCODE -ne 0) { throw 'Backup failed; nothing was changed.' }
+        Ok 'Backup completed'
+    } else { Warn 'Backup skipped by request' }
 
     Step "Check out $Branch"
     if ($currentBranch -ne $Branch) { Invoke-Native git @('checkout', $Branch) }
