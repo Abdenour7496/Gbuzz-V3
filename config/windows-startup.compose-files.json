@@ -8,10 +8,12 @@
                   "docker-compose.buzz.yml",
                   "docker-compose.knowledge-trust.yml",
                   "docker-compose.endpoint-observability.yml",
-                  "config/docker-compose.projector-attachment.yml"
+                  "config/docker-compose.projector-attachment.yml",
+                  "docker-compose.relationships.yml"
               ],
     "profiles":  [
-                     "observability"
+                     "observability",
+                     "relationship-projection"
                  ],
     "required_services":  [
                               "relay",
@@ -32,6 +34,7 @@
                               "alert-receiver",
                               "postgres-exporter",
                               "redis-exporter",
-                              "node-exporter"
+                              "node-exporter",
+                              "gcor-relationship-projector"
                           ]
 }
