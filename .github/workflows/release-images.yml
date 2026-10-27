@@ -68,7 +68,7 @@ jobs:
         run: |
           mkdir -p image-digests
           printf '%s\n' 'ghcr.io/${{ github.repository_owner }}/gbuzz-${{ matrix.image }}@${{ steps.build.outputs.digest }}' > 'image-digests/${{ matrix.image }}.txt'
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: image-${{ matrix.image }}
           path: image-digests/*.txt
@@ -88,7 +88,7 @@ jobs:
         shell: bash
         run: |
           find image-digests -type f -name '*.txt' -print0 | sort -z | xargs -0 cat > gbuzz-release-images.txt
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: gbuzz-release-image-manifest
           path: gbuzz-release-images.txt
