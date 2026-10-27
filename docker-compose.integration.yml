@@ -56,7 +56,24 @@ services:
       PGDATABASE: integration
     volumes:
       - ./relationship-projector/migrations:/relationship-migrations:ro
-    command: ["/bin/sh", "-ec", "psql -v ON_ERROR_STOP=1 -f /relationship-migrations/0015_postgres_relationship_projection.sql; psql -v ON_ERROR_STOP=1 -c \"CREATE ROLE relationship_integration LOGIN PASSWORD 'relationship-secret'; GRANT gcor_relationship_projector TO relationship_integration\""]
+    command: ["/bin/sh", "-ec", "for migration in /relationship-migrations/*.sql; do psql -v ON_ERROR_STOP=1 -f \"$$migration\"; done; psql -v ON_ERROR_STOP=1 -c \"CREATE ROLE relationship_integration LOGIN PASSWORD 'relationship-secret'; GRANT gcor_relationship_projector TO relationship_integration\""]
+    networks: [integration]
+
+  relationship-facts-check:
+    # Bi-temporal facts end to end with the projector's own code and restricted role.
+    profiles: ["relationship-projection"]
+    build:
+      context: .
+      dockerfile: relationship-projector/Dockerfile
+    depends_on:
+      relationship-migrate: {condition: service_completed_successfully}
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_DB: integration
+      PYTHONPATH: /app
+    volumes:
+      - ./tests/integration:/checks:ro
+    command: ["python", "/checks/temporal_facts_projection.py"]
     networks: [integration]
 
   mock-ollama:

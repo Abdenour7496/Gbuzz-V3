@@ -12,7 +12,7 @@ services:
     volumes:
       - ./relationship-projector/migrations:/relationship-migrations:ro
     entrypoint: ["/bin/sh", "-ec"]
-    command: ["psql -v ON_ERROR_STOP=1 -f /relationship-migrations/0015_postgres_relationship_projection.sql"]
+    command: ["for migration in /relationship-migrations/*.sql; do psql -v ON_ERROR_STOP=1 -f \"$$migration\"; done"]
     depends_on:
       gcor-migrate: {condition: service_completed_successfully}
     networks: [data-net]
@@ -40,6 +40,8 @@ services:
       RELATIONSHIP_MODEL: ${RELATIONSHIP_MODEL:-qwen2.5:1.5b}
       RELATIONSHIP_POLL_SECONDS: ${RELATIONSHIP_POLL_SECONDS:-10}
       RELATIONSHIP_MAX_ATTEMPTS: ${RELATIONSHIP_MAX_ATTEMPTS:-8}
+      # Bi-temporal facts (gcor.facts, migration 0018). Set false to keep entity/claim projection only.
+      RELATIONSHIP_TEMPORAL_FACTS: ${RELATIONSHIP_TEMPORAL_FACTS:-true}
     depends_on:
       gcor-relationship-migrate: {condition: service_completed_successfully}
       ollama: {condition: service_healthy}

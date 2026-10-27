@@ -27,8 +27,8 @@ WORKSPACE_PATHS = {'/api/workspace/channels', '/api/workspace/documents', '/api/
                    '/api/workspace/review', '/api/workspace/feedback', '/api/workspace/jobs',
                    '/api/workspace/submit', '/api/workspace/job-action', '/api/audit-packs',
                    '/api/workspace/unanswered', '/api/workspace/unanswered/resolve'}
-READ_PATHS = {'/api/ask', '/api/ask/reply', '/api/retrieve'}
-WORKLOAD_OPERATIONS = {'/api/ingest':'ingest','/api/retrieve':'retrieve','/api/ask':'retrieve',
+READ_PATHS = {'/api/ask', '/api/ask/reply', '/api/retrieve', '/api/facts/history'}
+WORKLOAD_OPERATIONS = {'/api/ingest':'ingest','/api/retrieve':'retrieve','/api/ask':'retrieve','/api/facts/history':'retrieve',
                        '/api/ask/reply':'reply','/api/audit-packs':'audit.export'}
 
 

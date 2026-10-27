@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { bech32 } from '@scure/base';
-import { parseSecretKey, signHttpAuth, requireChannel, askKnowledge, searchKnowledge, listUnanswered, publicKeyHex, KnowledgeError } from '../src/client.mjs';
+import { parseSecretKey, signHttpAuth, requireChannel, askKnowledge, searchKnowledge, listUnanswered, factHistory, publicKeyHex, KnowledgeError } from '../src/client.mjs';
 
 const HEX = '7f'.repeat(32);
 const CHANNEL = '11111111-1111-4111-8111-111111111111';
@@ -58,4 +58,22 @@ test('unanswered lists open questions without asker identities', async () => {
   assert.equal(seen.url, 'http://k:5011/api/workspace/unanswered');
   assert.deepEqual(seen.body, { channel_id: CHANNEL, status: 'open', limit: 100 });
   assert.deepEqual(r.questions, [{ id: 'q1', question: 'Who owns X?', asked: 3, people: 2, last_asked: 't' }]);
+});
+
+test('fact history posts a scoped request and summarises the timeline', async () => {
+  let seen;
+  const fetchImpl = async (url, init) => { seen = { url, body: JSON.parse(init.body) };
+    return new Response(JSON.stringify({ subject: 'Release process', as_of: 'now', known_at: null, facts: [
+      { subject: 'Release process', predicate: 'OWNED_BY', object: 'Alice', fact: 'Alice owns it', valid_at: '2026-03-01T00:00:00+00:00',
+        invalid_at: '2026-10-01T00:00:00+00:00', status: 'superseded', is_true: false, superseded_by: { object: 'Bob' },
+        source: { title: 'Handbook', document_id: 'd1' }, evidence_node_ids: ['n'] }] })); };
+  const r = await factHistory({ channelId: CHANNEL, subject: ' Release process ', view: 'true_at', asOf: '2026-05-01', limit: 999 },
+    { secret: parseSecretKey(HEX), fetchImpl, origin: 'http://k:5011' });
+  assert.equal(seen.url, 'http://k:5011/api/facts/history');
+  assert.deepEqual(seen.body, { channel_id: CHANNEL, subject: 'Release process', predicate: null, view: 'true_at',
+    as_of: '2026-05-01', known_at: null, limit: 200 });
+  assert.deepEqual(r.facts[0], { subject: 'Release process', predicate: 'OWNED_BY', value: 'Alice', fact: 'Alice owns it',
+    from: '2026-03-01T00:00:00+00:00', until: '2026-10-01T00:00:00+00:00', status: 'superseded', true_now: false,
+    superseded_by: 'Bob', source: { title: 'Handbook', document_id: 'd1' } });
+  await assert.rejects(factHistory({ channelId: CHANNEL, subject: 'x', view: 'all' }, { secret: parseSecretKey(HEX), fetchImpl }), /view/);
 });

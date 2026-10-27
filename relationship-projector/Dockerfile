@@ -4,6 +4,7 @@ WORKDIR /app
 COPY projector/requirements.lock ./requirements.lock
 RUN pip install --no-cache-dir --require-hashes -r requirements.lock
 COPY relationship-projector/main.py ./main.py
+COPY relationship-projector/temporal_facts.py ./temporal_facts.py
 COPY relationship-projector/test_main.py ./test_main.py
 
 USER 65532:65532
