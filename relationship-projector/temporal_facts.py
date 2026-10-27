@@ -290,7 +290,7 @@ COPY_COLUMNS = (
 ELIGIBLE_SOURCE = (
     "d.content_sha256 = f.source_revision AND d.metadata->>'knowledge_state' = 'approved'"
     " AND (NOT (d.metadata ? 'knowledge_readers') OR d.metadata->'knowledge_readers' = 'null'::jsonb)"
-    " AND gcor.knowledge_evidence_current(d.id)"
+    " AND gcor.relationship_evidence_current(d.id)"
 )
 
 

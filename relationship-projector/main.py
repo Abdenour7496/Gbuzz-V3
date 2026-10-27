@@ -186,7 +186,7 @@ async def invalidate_stale(pool: asyncpg.Pool) -> None:
              OR p.source_revision<>d.content_sha256
              OR p.channel_id IS DISTINCT FROM d.metadata->>'channel_id'
              OR d.metadata->>'knowledge_state' IS DISTINCT FROM 'approved'
-             OR NOT gcor.knowledge_evidence_current(d.id))"""
+             OR NOT gcor.relationship_evidence_current(d.id))"""
     )
     for row in rows:
         async with pool.acquire() as connection:
@@ -259,7 +259,7 @@ async def project_document(pool: asyncpg.Pool, client: httpx.AsyncClient, row: a
                 row["id"],
             )
             current = await connection.fetchrow(
-                "SELECT content_sha256,metadata->>'channel_id' AS channel_id,metadata->>'knowledge_state' AS state,gcor.knowledge_evidence_current(id) AS evidence_current FROM gcor.documents WHERE id=$1 FOR UPDATE",
+                "SELECT content_sha256,metadata->>'channel_id' AS channel_id,metadata->>'knowledge_state' AS state,gcor.relationship_evidence_current(id) AS evidence_current FROM gcor.documents WHERE id=$1 FOR UPDATE",
                 row["id"],
             )
             locked_chunks = [dict(item) for item in await connection.fetch(
@@ -349,7 +349,7 @@ async def claim_documents(pool: asyncpg.Pool, model: str, owner: UUID, max_attem
                 """WITH candidates AS (
                      SELECT d.id FROM gcor.documents d LEFT JOIN gcor.relationship_projection p ON p.document_id=d.id
                      WHERE d.metadata->>'knowledge_state'='approved' AND d.metadata->>'channel_id' IS NOT NULL
-                       AND gcor.knowledge_evidence_current(d.id)
+                       AND gcor.relationship_evidence_current(d.id)
                        AND (p.document_id IS NULL OR p.source_revision<>d.content_sha256 OR p.status='stale'
                             OR (p.status='failed' AND p.attempts<$3 AND COALESCE(p.next_retry_at,now())<=now())
                             OR (p.status='processing' AND p.lease_expires_at<now()))
