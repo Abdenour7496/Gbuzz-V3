@@ -55,7 +55,12 @@ try:
         assert stored["Body"].read() == expected, key
         assert stored["ETag"] == f'"{hashlib.sha256(expected).hexdigest()}"', key
     original = store.get_object(Bucket=bucket, Key="bundles/doc/original.bin")
-    assert original["ContentType"] == "application/pdf" and original["Metadata"]["event_id"] == "e-1", original
+    source = s3.get_object(Bucket=bucket, Key="bundles/doc/original.bin")
+    assert original["ContentType"] == "application/pdf", original
+    # Metadata is copied exactly as S3 reports it (some S3 servers drop user metadata on versions).
+    copied = {k: v for k, v in original["Metadata"].items() if k != "migrated_from_version"}
+    assert copied == {k.lower(): v for k, v in (source.get("Metadata") or {}).items()}, (copied, source.get("Metadata"))
+    assert original["Metadata"]["migrated_from_version"], original
     history = store.list_object_versions(Bucket=bucket, Prefix="bundles/doc/original.bin")["Versions"]
     assert [item["IsLatest"] for item in history] == [True, False], history
     older = store.get_object(Bucket=bucket, Key="bundles/doc/original.bin", VersionId=history[1]["VersionId"])
