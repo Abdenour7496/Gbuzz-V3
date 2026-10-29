@@ -38,4 +38,7 @@ COPY schemas ./schemas
 COPY tests ./tests
 
 EXPOSE 5001
+# Run unprivileged even outside Compose; the image needs no writable path but /tmp.
+RUN useradd --system --uid 10001 --no-create-home gcor
+USER 10001:10001
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "5001"]

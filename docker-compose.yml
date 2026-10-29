@@ -1,7 +1,20 @@
+# Runtime hardening shared by GCOR's own services. Every limit can be raised from .env.
+x-gcor-hardening: &gcor-hardening
+  user: "10001:10001"
+  security_opt: [no-new-privileges:true]
+  cap_drop: [ALL]
+  read_only: true
+  tmpfs: ["/tmp:size=128m,mode=1777"]
+  init: true
+  pids_limit: ${GCOR_PIDS_LIMIT:-256}
+
 services:
   relay:
     image: ${BUZZ_IMAGE:-ghcr.io/block/buzz:sha-7ebf1be}
     restart: unless-stopped
+    security_opt: [no-new-privileges:true]
+    mem_limit: ${RELAY_MEM_LIMIT:-1g}
+    pids_limit: 512
     env_file: ${BUZZ_ENV_FILE:-.env}
     environment:
       BUZZ_BIND_ADDR: 0.0.0.0:3000
@@ -45,6 +58,9 @@ services:
   postgres:
     image: pgvector/pgvector:pg17
     restart: unless-stopped
+    security_opt: [no-new-privileges:true]
+    mem_limit: ${POSTGRES_MEM_LIMIT:-4g}
+    pids_limit: 1024
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-buzz}
       POSTGRES_USER: ${POSTGRES_USER:-buzz}
@@ -68,6 +84,9 @@ services:
   redis:
     image: redis:7-alpine
     restart: unless-stopped
+    security_opt: [no-new-privileges:true]
+    mem_limit: ${REDIS_MEM_LIMIT:-512m}
+    pids_limit: 256
     command: ["redis-server", "--appendonly", "yes", "--requirepass", "${REDIS_PASSWORD:?set REDIS_PASSWORD}"]
     environment:
       REDIS_PASSWORD: ${REDIS_PASSWORD:?set REDIS_PASSWORD}
@@ -89,6 +108,9 @@ services:
   minio:
     image: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
     restart: unless-stopped
+    security_opt: [no-new-privileges:true]
+    mem_limit: ${MINIO_MEM_LIMIT:-1g}
+    pids_limit: 512
     command: server /data --console-address ":9001"
     environment:
       MINIO_ROOT_USER: ${BUZZ_S3_ACCESS_KEY:?set BUZZ_S3_ACCESS_KEY}
@@ -155,6 +177,10 @@ services:
     # Pinned to the digest recorded in docker-compose.production.lock.yml; override OLLAMA_IMAGE to upgrade deliberately.
     image: ${OLLAMA_IMAGE:-ollama/ollama@sha256:d5034f60974be528e0a5523ba5e89156e4a9ffd12d0b2b18475fb148237f3d4c}
     restart: unless-stopped
+    security_opt: [no-new-privileges:true]
+    # Ceiling, not a reservation: fits qwen2.5 up to 7b plus the embedding model.
+    mem_limit: ${OLLAMA_MEM_LIMIT:-12g}
+    pids_limit: 512
     volumes:
       - ollama-data:/root/.ollama
     healthcheck:
@@ -208,10 +234,12 @@ services:
     networks: [data-net]
 
   gcor-proxy:
+    <<: *gcor-hardening
     build:
       context: .
       dockerfile: proxy/Dockerfile
     restart: unless-stopped
+    mem_limit: ${GCOR_PROXY_MEM_LIMIT:-2g}
     depends_on:
       gcor-migrate:
         condition: service_completed_successfully
@@ -290,8 +318,10 @@ services:
     networks: [buzz-net, data-net]
 
   mcp-postgres-gcor:
+    <<: *gcor-hardening
     build: ./mcp-postgres-gcor
     restart: unless-stopped
+    mem_limit: ${GCOR_MCP_MEM_LIMIT:-512m}
     depends_on:
       gcor-proxy:
         condition: service_healthy
@@ -424,10 +454,12 @@ services:
     networks: [buzz-net]
 
   gcor-event-projector:
+    <<: *gcor-hardening
     build:
       context: .
       dockerfile: projector/Dockerfile
     restart: unless-stopped
+    mem_limit: ${GCOR_PROJECTOR_MEM_LIMIT:-512m}
     depends_on:
       relay:
         condition: service_healthy
@@ -456,23 +488,30 @@ services:
     networks: [buzz-net, data-net]
 
   docker-socket-proxy:
-    # The only holder of the Docker Engine socket. It forwards container listing,
-    # inspection and restart requests and rejects everything else (exec, create,
-    # images, volumes, networks, swarm, system). Reachable solely on control-net.
-    image: tecnativa/docker-socket-proxy:latest
+    # The only holder of the Docker Engine socket, built from this repository
+    # (recovery-controller/socket_proxy.py). It lists and restarts only containers
+    # labelled for this stack's recovery and refuses every other Docker API call.
+    # Reachable solely on control-net.
+    image: gbuzz-docker-socket-proxy:local
+    build:
+      context: .
+      dockerfile: recovery-controller/socket-proxy.Dockerfile
     restart: unless-stopped
     environment:
-      CONTAINERS: "1"
-      ALLOW_RESTARTS: "1"
-      POST: "0"
-      EVENTS: "0"
-      PING: "1"
-      VERSION: "0"
-      LOG_LEVEL: warning
+      RECOVERY_STACK_ID: ${RECOVERY_STACK_ID:-gbuzz}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
     security_opt:
       - no-new-privileges:true
+    cap_drop: [ALL]
+    read_only: true
+    mem_limit: 128m
+    pids_limit: 64
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:2375/_ping')"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
     networks: [control-net]
 
   recovery-controller:
@@ -492,7 +531,9 @@ services:
       DOCKER_HOST: tcp://docker-socket-proxy:2375
     depends_on:
       docker-socket-proxy:
-        condition: service_started
+        condition: service_healthy
+    mem_limit: 256m
+    pids_limit: 64
     volumes:
       - recovery-audit-data:/var/lib/gbuzz-recovery
     ports:
