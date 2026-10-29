@@ -102,6 +102,7 @@ services:
       POSTGRES_ADMIN_USER: integration
       POSTGRES_ADMIN_PASSWORD: integration
       POSTGRES_DB: integration
+      GCOR_OBJECT_STORE: ${INTEGRATION_OBJECT_STORE:-postgres}
       MINIO_ENDPOINT: http://minio:9000
       MINIO_ROOT_USER: integration
       MINIO_ROOT_PASSWORD: integration-secret

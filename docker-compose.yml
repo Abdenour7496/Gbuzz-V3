@@ -225,6 +225,9 @@ services:
       POSTGRES_USER: ${GCOR_DB_USER:-${POSTGRES_USER:-buzz}}
       POSTGRES_PASSWORD: ${GCOR_DB_PASSWORD:-${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}}
       POSTGRES_DB: ${POSTGRES_DB:-buzz}
+      # postgres keeps GCOR's files and evidence in gcor.objects (no S3 credentials used);
+      # s3 keeps them in MinIO. Switch an existing install only after proxy/migrate_objects.py.
+      GCOR_OBJECT_STORE: ${GCOR_OBJECT_STORE:-s3}
       MINIO_ENDPOINT: http://minio:9000
       MINIO_ROOT_USER: ${GCOR_S3_ACCESS_KEY:-${BUZZ_S3_ACCESS_KEY:?set BUZZ_S3_ACCESS_KEY}}
       MINIO_ROOT_PASSWORD: ${GCOR_S3_SECRET_KEY:-${BUZZ_S3_SECRET_KEY:?set BUZZ_S3_SECRET_KEY}}

@@ -13,6 +13,7 @@ from typing import Any
 from urllib.parse import urlparse
 from uuid import UUID, uuid4
 
+import httpx
 from botocore.exceptions import ClientError
 from coincurve import PrivateKey, PublicKeyXOnly
 from fastapi import APIRouter, Header, HTTPException, Request
@@ -29,6 +30,9 @@ MAX_EVENTS = int(os.getenv("AUDIT_PACK_MAX_EVENTS", "5000"))
 MAX_BYTES = int(os.getenv("AUDIT_PACK_MAX_BYTES", str(100 * 1024 * 1024)))
 MAX_RANGE_DAYS = int(os.getenv("AUDIT_PACK_MAX_RANGE_DAYS", "366"))
 MEDIA_BUCKET = os.getenv("BUZZ_MEDIA_BUCKET", "buzz-media")
+# With GCOR_OBJECT_STORE=postgres GCOR holds no credential for the relay's media bucket, so it reads
+# attachments through the relay's own content-addressed /media endpoint and verifies their hashes.
+RELAY_MEDIA_URL = os.getenv("BUZZ_RELAY_HTTP_URL", "http://relay:3000").rstrip("/")
 
 
 class AuditPackRequest(BaseModel):
@@ -197,6 +201,35 @@ async def s3_bytes(client: Any, bucket: str, key: str) -> bytes:
         raise HTTPException(409, f"Required evidence object is unavailable: {bucket}/{key} ({code})") from error
 
 
+async def relay_media_bytes(object_key: str) -> bytes:
+    if not re.fullmatch(r"[0-9a-f]{64}(\.[A-Za-z0-9]{1,16})?", object_key):
+        raise HTTPException(409, "Attachment reference is not a content-addressed media key")
+    url = f"{RELAY_MEDIA_URL}/media/{object_key}"
+    try:
+        async with httpx.AsyncClient(timeout=30, follow_redirects=False, trust_env=False) as client:
+            async with client.stream("GET", url) as response:
+                response.raise_for_status()
+                data = bytearray()
+                async for chunk in response.aiter_bytes(64 * 1024):
+                    data.extend(chunk)
+                    if len(data) > MAX_BYTES:
+                        raise HTTPException(413, f"Attachment exceeds {MAX_BYTES} bytes")
+                return bytes(data)
+    except httpx.HTTPError as error:
+        raise HTTPException(409, f"Required attachment is unavailable from the relay: {object_key} ({type(error).__name__})") from error
+
+
+def object_uri(request: Request, bucket: str, key: str) -> str:
+    scheme = "gcor-postgres" if getattr(request.app.state, "object_store", "s3") == "postgres" else "s3"
+    return f"{scheme}://{bucket}/{key}"
+
+
+async def attachment_bytes(request: Request, object_key: str) -> tuple[bytes, str]:
+    if getattr(request.app.state, "object_store", "s3") == "postgres":
+        return await relay_media_bytes(object_key), f"{RELAY_MEDIA_URL}/media/{object_key}"
+    return await s3_bytes(request.app.state.s3, MEDIA_BUCKET, object_key), f"s3://{MEDIA_BUCKET}/{object_key}"
+
+
 def timeline(events: list[dict[str, Any]]) -> bytes:
     lines = ["# Audit chronology", ""]
     for event in events:
@@ -272,19 +305,19 @@ async def create_audit_pack(
         markdown_digest = record_manifest.get("objects", {}).get("markdown_sha256")
         if markdown_digest and hashlib.sha256(objects["content"]).hexdigest() != markdown_digest:
             raise HTTPException(409, f"Archived markdown failed hash verification for record {record_id}")
-        writer.add(f"archive/{record_id}/original.bin", objects["original"], evidence_type="archived_original", source=f"s3://{row['bucket']}/{row['original_key']}")
-        writer.add(f"archive/{record_id}/content.md", objects["content"], evidence_type="normalized_content", source=f"s3://{row['bucket']}/{row['markdown_key']}")
-        writer.add(f"archive/{record_id}/record.json", objects["record"], evidence_type="ingestion_manifest", source=f"s3://{row['bucket']}/{row['record_key']}")
+        writer.add(f"archive/{record_id}/original.bin", objects["original"], evidence_type="archived_original", source=object_uri(request, row['bucket'], row['original_key']))
+        writer.add(f"archive/{record_id}/content.md", objects["content"], evidence_type="normalized_content", source=object_uri(request, row['bucket'], row['markdown_key']))
+        writer.add(f"archive/{record_id}/record.json", objects["record"], evidence_type="ingestion_manifest", source=object_uri(request, row['bucket'], row['record_key']))
 
     attachment_count = 0
     if payload.include_attachments:
         for event in events:
             for index, ref in enumerate(attachment_refs(event["tags"]), 1):
-                data = await s3_bytes(request.app.state.s3, MEDIA_BUCKET, ref["object_key"])
+                data, source = await attachment_bytes(request, ref["object_key"])
                 if hashlib.sha256(data).hexdigest() != ref["sha256"]:
                     raise HTTPException(409, f"Attachment failed hash verification for event {event['id']}")
                 name = safe_name(ref.get("filename", ""), ref["object_key"])
-                writer.add(f"attachments/{event['id']}/{index:02d}-{name}", data, evidence_type="buzz_attachment", source=f"s3://{MEDIA_BUCKET}/{ref['object_key']}")
+                writer.add(f"attachments/{event['id']}/{index:02d}-{name}", data, evidence_type="buzz_attachment", source=source)
                 attachment_count += 1
 
     unsigned_manifest = {
@@ -341,6 +374,6 @@ async def create_audit_pack(
             "X-Audit-Pack-Id": str(pack_id),
             "X-Audit-Pack-SHA256": pack_digest,
             "X-Audit-Manifest-SHA256": manifest["seal"]["manifest_sha256"],
-            "X-Audit-Object": f"s3://{bucket}/{object_key}",
+            "X-Audit-Object": object_uri(request, bucket, object_key),
         },
     )

@@ -210,5 +210,37 @@ class AuditPackEndpointTests(unittest.IsolatedAsyncioTestCase):
                 await audit_pack.create_audit_pack(payload, request, "secret")
 
 
+class PostgresModeAttachmentTest(unittest.IsolatedAsyncioTestCase):
+    """With GCOR_OBJECT_STORE=postgres, attachments come from the relay's /media endpoint."""
+
+    def request(self, mode):
+        return SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(object_store=mode, s3=None)))
+
+    async def test_rejects_keys_that_are_not_content_addressed(self):
+        for key in ("../secret", "a" * 63, "A" * 64, "a" * 64 + "/x"):
+            with self.subTest(key=key):
+                with self.assertRaises(audit_pack.HTTPException) as error:
+                    await audit_pack.relay_media_bytes(key)
+                self.assertEqual(409, error.exception.status_code)
+
+    async def test_postgres_mode_reads_relay_media_and_labels_the_source(self):
+        key = "b" * 64 + ".pdf"
+        with patch.object(audit_pack, "relay_media_bytes", return_value=b"bytes") as fetch:
+            data, source = await audit_pack.attachment_bytes(self.request("postgres"), key)
+        fetch.assert_awaited_once_with(key)
+        self.assertEqual(b"bytes", data)
+        self.assertEqual(f"{audit_pack.RELAY_MEDIA_URL}/media/{key}", source)
+
+    async def test_s3_mode_keeps_reading_the_media_bucket(self):
+        with patch.object(audit_pack, "s3_bytes", return_value=b"bytes") as fetch:
+            _, source = await audit_pack.attachment_bytes(self.request("s3"), "c" * 64)
+        fetch.assert_awaited_once()
+        self.assertEqual(f"s3://{audit_pack.MEDIA_BUCKET}/{'c' * 64}", source)
+
+    def test_object_uri_names_the_backend(self):
+        self.assertEqual("gcor-postgres://b/k", audit_pack.object_uri(self.request("postgres"), "b", "k"))
+        self.assertEqual("s3://b/k", audit_pack.object_uri(self.request("s3"), "b", "k"))
+
+
 if __name__ == "__main__":
     unittest.main()

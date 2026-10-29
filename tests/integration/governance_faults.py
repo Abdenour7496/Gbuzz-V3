@@ -19,7 +19,7 @@ class GovernanceFaultTest(unittest.IsolatedAsyncioTestCase):
                                              password=main.POSTGRES_PASSWORD, database=main.POSTGRES_DB,
                                              min_size=1, max_size=5, server_settings={'gcor.workload':'ingestion-worker'})
         self.admin = await admin_pool()
-        self.s3 = main.minio_client()
+        self.s3 = main.object_store_client()
         self.doc = uuid4()
         digest = hashlib.sha256(self.doc.bytes).hexdigest()
         await self.pool.execute(

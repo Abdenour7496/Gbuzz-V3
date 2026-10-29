@@ -19,6 +19,8 @@ COPY proxy/reranker.py .
 COPY proxy/unanswered.py .
 COPY proxy/temporal_facts.py .
 COPY proxy/audit_pack.py .
+COPY proxy/object_store.py .
+COPY proxy/migrate_objects.py .
 COPY proxy/buzz_chat.py .
 COPY proxy/buzz_synthesis.py .
 COPY proxy/buzz_cards.py .

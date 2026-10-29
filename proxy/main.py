@@ -42,6 +42,7 @@ import reranker
 import unanswered
 import temporal_facts
 from audit_pack import router as audit_pack_router
+from object_store import PostgresObjectStore
 
 logger = logging.getLogger("gcor.proxy")
 
@@ -51,9 +52,16 @@ POSTGRES_PORT = int(os.getenv("POSTGRES_PORT", "5432"))
 POSTGRES_USER = os.environ["POSTGRES_USER"]
 POSTGRES_PASSWORD = os.environ["POSTGRES_PASSWORD"]
 POSTGRES_DB = os.environ["POSTGRES_DB"]
-MINIO_ENDPOINT = os.environ["MINIO_ENDPOINT"]
-MINIO_ACCESS_KEY = os.environ["MINIO_ROOT_USER"]
-MINIO_SECRET_KEY = os.environ["MINIO_ROOT_PASSWORD"]
+# Where GCOR keeps original files, renditions, recovery bundles and governance evidence:
+#   s3       - an S3-compatible service (MinIO); the historical default.
+#   postgres - gcor.blobs/gcor.objects in the same database (migration 0019); no S3 credentials.
+GCOR_OBJECT_STORE = os.getenv("GCOR_OBJECT_STORE", "s3").strip().lower()
+if GCOR_OBJECT_STORE not in {"s3", "postgres"}:
+    raise RuntimeError("GCOR_OBJECT_STORE must be 's3' or 'postgres'")
+_S3_REQUIRED = GCOR_OBJECT_STORE == "s3"
+MINIO_ENDPOINT = os.environ["MINIO_ENDPOINT"] if _S3_REQUIRED else os.getenv("MINIO_ENDPOINT", "")
+MINIO_ACCESS_KEY = os.environ["MINIO_ROOT_USER"] if _S3_REQUIRED else os.getenv("MINIO_ROOT_USER", "")
+MINIO_SECRET_KEY = os.environ["MINIO_ROOT_PASSWORD"] if _S3_REQUIRED else os.getenv("MINIO_ROOT_PASSWORD", "")
 MINIO_BUCKET = os.getenv("MINIO_BUCKET", "buzz-gcor")
 # Channel buckets share this prefix so a scoped object-store policy can cover them.
 # Empty keeps historical unprefixed names for deployments created before scoping.
@@ -862,6 +870,21 @@ async def embed(texts: list[str]) -> list[list[float]]:
     raise HTTPException(500, "EMBEDDING_BACKEND must be openai or ollama")
 
 
+def postgres_object_store(timeout: float, max_size: int = 4) -> PostgresObjectStore:
+    if POSTGRES_DSN:
+        return PostgresObjectStore(dsn=POSTGRES_DSN, timeout=timeout, max_size=max_size)
+    return PostgresObjectStore(host=POSTGRES_HOST, port=POSTGRES_PORT, user=POSTGRES_USER,
+                               password=POSTGRES_PASSWORD, database=POSTGRES_DB,
+                               timeout=timeout, max_size=max_size)
+
+
+def object_store_client(timeout: float = 30.0, config: Config | None = None) -> Any:
+    """The configured GCOR object store; both backends expose the same S3-shaped methods."""
+    if GCOR_OBJECT_STORE == "postgres":
+        return postgres_object_store(timeout)
+    return minio_client(config)
+
+
 def minio_client(config: Config | None = None) -> Any:
     return boto3.client(
         "s3",
@@ -1209,14 +1232,19 @@ async def lifespan(app: FastAPI):
         if not role or any(role.values()) or owns_schema:
             await app.state.pool.close()
             raise RuntimeError('Knowledge services require a non-owner runtime database role without elevated privileges')
-    app.state.s3 = minio_client()
-    app.state.readiness_s3 = minio_client(Config(connect_timeout=2, read_timeout=2, retries={"total_max_attempts": 1}))
+    if GCOR_OBJECT_STORE == "postgres" and not await app.state.pool.fetchval("SELECT to_regclass('gcor.objects')"):
+        await app.state.pool.close()
+        raise RuntimeError("GCOR_OBJECT_STORE=postgres needs migration 0019_postgres_object_store.sql")
+    app.state.object_store = GCOR_OBJECT_STORE
+    app.state.s3 = object_store_client()
+    app.state.readiness_s3 = object_store_client(2.0, Config(connect_timeout=2, read_timeout=2, retries={"total_max_attempts": 1}))
     app.state.readiness_task = None
     app.state.readiness_checked_at = 0.0
     await ensure_bucket(app)
-    await ensure_all_bucket_versioning(app.state.s3)
+    if GCOR_OBJECT_STORE == "s3":
+        await ensure_all_bucket_versioning(app.state.s3)
     app.state.governance_available = bool(await app.state.pool.fetchval("SELECT to_regclass('gcor.governance_outbox')"))
-    app.state.governance_s3 = minio_client(Config(connect_timeout=2, read_timeout=5, retries={"total_max_attempts": 1}))
+    app.state.governance_s3 = object_store_client(5.0, Config(connect_timeout=2, read_timeout=5, retries={"total_max_attempts": 1}))
     publisher = None
     if app.state.governance_available:
         token=current_principal.set(Principal('governance-publisher','','',role='service',workload=True,operations=frozenset({'publish'})))
@@ -1242,6 +1270,8 @@ async def lifespan(app: FastAPI):
         app.state.readiness_task.cancel()
         await asyncio.gather(app.state.readiness_task, return_exceptions=True)
     app.state.readiness_s3.close()
+    if GCOR_OBJECT_STORE == "postgres":
+        await asyncio.to_thread(app.state.s3.close)
     await app.state.pool.close()
 
 

@@ -22,6 +22,12 @@ async def run():
             if row[field]:objects[(row['bucket'],row[field])]=row['content_sha256'] if field=='original_key' else None
     for row in await db.fetch('SELECT bucket,object_key FROM gcor.governance_outbox WHERE published_at IS NOT NULL'):
         objects[(row['bucket'],row['object_key'])]=None
+    # Objects held in gcor.objects (GCOR_OBJECT_STORE=postgres) were restored with the database
+    # itself; their digests are enforced by gcor.blobs. Only S3-held objects are copied here.
+    if await db.fetchval("SELECT to_regclass('gcor.objects') IS NOT NULL"):
+        stored={(r['bucket'],r['object_key']) for r in await db.fetch('SELECT bucket,object_key FROM gcor.objects WHERE is_latest')}
+        for pair in stored & objects.keys():
+            del objects[pair]
     output=Path('/backup/objects');output.mkdir(exist_ok=True)
     index=[];total=0;created=set()
     for (bucket,key),expected in objects.items():
