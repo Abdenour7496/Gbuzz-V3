@@ -277,6 +277,23 @@ jobs:
           severity: HIGH,CRITICAL
           ignore-unfixed: true
           exit-code: "1"
+      - name: Annotate scan findings
+        # Surfaces each HIGH/CRITICAL finding on the PR checks page without opening the SARIF.
+        if: always()
+        run: |
+          python3 - <<'PY'
+          import json, os
+          path = "trivy-results.sarif"
+          if not os.path.exists(path):
+              raise SystemExit(0)
+          for run in json.load(open(path)).get("runs", []):
+              rules = {r["id"]: r for r in run.get("tool", {}).get("driver", {}).get("rules", [])}
+              for result in run.get("results", []):
+                  rule = rules.get(result.get("ruleId"), {})
+                  where = (result.get("locations") or [{}])[0].get("physicalLocation", {}).get("artifactLocation", {}).get("uri", "")
+                  text = result.get("message", {}).get("text", "").replace("\n", " ")[:400]
+                  print(f"::error file={where},title={result.get('ruleId')}::{rule.get('shortDescription', {}).get('text', '')} :: {text}")
+          PY
       - name: Upload scan results
         if: always()
         uses: github/codeql-action/upload-sarif@v3
