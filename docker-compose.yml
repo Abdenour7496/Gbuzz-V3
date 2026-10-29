@@ -13,7 +13,7 @@ services:
     image: ${BUZZ_IMAGE:-ghcr.io/block/buzz:sha-7ebf1be}
     restart: unless-stopped
     security_opt: [no-new-privileges:true]
-    mem_limit: ${RELAY_MEM_LIMIT:-1g}
+    mem_limit: ${RELAY_MEMORY_LIMIT:-1g}
     pids_limit: 512
     env_file: ${BUZZ_ENV_FILE:-.env}
     environment:
@@ -59,7 +59,7 @@ services:
     image: pgvector/pgvector:pg17
     restart: unless-stopped
     security_opt: [no-new-privileges:true]
-    mem_limit: ${POSTGRES_MEM_LIMIT:-4g}
+    mem_limit: ${POSTGRES_MEMORY_LIMIT:-4g}
     pids_limit: 1024
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-buzz}
@@ -85,7 +85,7 @@ services:
     image: redis:7-alpine
     restart: unless-stopped
     security_opt: [no-new-privileges:true]
-    mem_limit: ${REDIS_MEM_LIMIT:-512m}
+    mem_limit: ${REDIS_MEMORY_LIMIT:-512m}
     pids_limit: 256
     command: ["redis-server", "--appendonly", "yes", "--requirepass", "${REDIS_PASSWORD:?set REDIS_PASSWORD}"]
     environment:
@@ -109,7 +109,7 @@ services:
     image: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
     restart: unless-stopped
     security_opt: [no-new-privileges:true]
-    mem_limit: ${MINIO_MEM_LIMIT:-1g}
+    mem_limit: ${MINIO_MEMORY_LIMIT:-1g}
     pids_limit: 512
     command: server /data --console-address ":9001"
     environment:
@@ -179,7 +179,7 @@ services:
     restart: unless-stopped
     security_opt: [no-new-privileges:true]
     # Ceiling, not a reservation: fits qwen2.5 up to 7b plus the embedding model.
-    mem_limit: ${OLLAMA_MEM_LIMIT:-12g}
+    mem_limit: ${OLLAMA_MEMORY_LIMIT:-12g}
     pids_limit: 512
     volumes:
       - ollama-data:/root/.ollama
@@ -239,7 +239,7 @@ services:
       context: .
       dockerfile: proxy/Dockerfile
     restart: unless-stopped
-    mem_limit: ${GCOR_PROXY_MEM_LIMIT:-2g}
+    mem_limit: ${GCOR_PROXY_MEMORY_LIMIT:-2g}
     depends_on:
       gcor-migrate:
         condition: service_completed_successfully
@@ -321,7 +321,7 @@ services:
     <<: *gcor-hardening
     build: ./mcp-postgres-gcor
     restart: unless-stopped
-    mem_limit: ${GCOR_MCP_MEM_LIMIT:-512m}
+    mem_limit: ${GCOR_MCP_MEMORY_LIMIT:-512m}
     depends_on:
       gcor-proxy:
         condition: service_healthy
@@ -459,7 +459,7 @@ services:
       context: .
       dockerfile: projector/Dockerfile
     restart: unless-stopped
-    mem_limit: ${GCOR_PROJECTOR_MEM_LIMIT:-512m}
+    mem_limit: ${EVENT_PROJECTOR_MEMORY_LIMIT:-512m}
     depends_on:
       relay:
         condition: service_healthy
@@ -505,7 +505,7 @@ services:
       - no-new-privileges:true
     cap_drop: [ALL]
     read_only: true
-    mem_limit: 128m
+    mem_limit: ${DOCKER_SOCKET_PROXY_MEMORY_LIMIT:-128m}
     pids_limit: 64
     healthcheck:
       test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:2375/_ping')"]
@@ -532,7 +532,7 @@ services:
     depends_on:
       docker-socket-proxy:
         condition: service_healthy
-    mem_limit: 256m
+    mem_limit: ${RECOVERY_CONTROLLER_MEMORY_LIMIT:-256m}
     pids_limit: 64
     volumes:
       - recovery-audit-data:/var/lib/gbuzz-recovery

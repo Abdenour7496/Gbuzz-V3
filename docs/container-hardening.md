@@ -5,12 +5,14 @@ knowledge-trust overlay, so every installation gets it, including a fresh cloud 
 
 | Service | User | Root filesystem | Capabilities | `no-new-privileges` | Memory ceiling | Processes |
 | --- | --- | --- | --- | --- | --- | --- |
-| gcor-proxy (and gcor-enterprise, buzz-knowledge, which extend it) | 10001 | read-only, `/tmp` tmpfs | none | yes | `GCOR_PROXY_MEM_LIMIT` 2g | `GCOR_PIDS_LIMIT` 256 |
-| gcor-event-projector | 10001 | read-only | none | yes | `GCOR_PROJECTOR_MEM_LIMIT` 512m | 256 |
-| mcp-postgres-gcor | 10001 | read-only | none | yes | `GCOR_MCP_MEM_LIMIT` 512m | 256 |
-| docker-socket-proxy (built from this repo) | root, socket access only | read-only | none | yes | 128m | 64 |
-| recovery-controller | root, writes its audit volume | read-only | none | yes | 256m | 64 |
-| relay, postgres, redis, minio, ollama | image default | image default | image default | yes | `RELAY_MEM_LIMIT` 1g, `POSTGRES_MEM_LIMIT` 4g, `REDIS_MEM_LIMIT` 512m, `MINIO_MEM_LIMIT` 1g, `OLLAMA_MEM_LIMIT` 12g | 512, 1024, 256, 512, 512 |
+| gcor-proxy (and gcor-enterprise, buzz-knowledge, which extend it) | 10001 | read-only, `/tmp` tmpfs | none | yes | `GCOR_PROXY_MEMORY_LIMIT` 2g | `GCOR_PIDS_LIMIT` 256 |
+| gcor-event-projector | 10001 | read-only | none | yes | `EVENT_PROJECTOR_MEMORY_LIMIT` 512m | 256 |
+| mcp-postgres-gcor | 10001 | read-only | none | yes | `GCOR_MCP_MEMORY_LIMIT` 512m | 256 |
+| docker-socket-proxy (built from this repo) | root, socket access only | read-only | none | yes | `DOCKER_SOCKET_PROXY_MEMORY_LIMIT` 128m | 64 |
+| recovery-controller | root, writes its audit volume | read-only | none | yes | `RECOVERY_CONTROLLER_MEMORY_LIMIT` 256m | 64 |
+| relay, postgres, redis, minio, ollama | image default | image default | image default | yes | `RELAY_MEMORY_LIMIT` 1g, `POSTGRES_MEMORY_LIMIT` 4g, `REDIS_MEMORY_LIMIT` 512m, `MINIO_MEMORY_LIMIT` 1g, `OLLAMA_MEMORY_LIMIT` 12g | 512, 1024, 256, 512, 512 |
+
+The variable names match `docker-compose.production.yml`, which sets tighter production values. List-valued keys (`security_opt`, `cap_drop`, `tmpfs`) are declared once per service across all overlays, because older Compose versions reject duplicated entries.
 
 Memory limits are ceilings, not reservations; raise them in `.env` if a host runs bigger models
 or larger databases. The proxy, projector and MCP images also set `USER 10001:10001`, so they run

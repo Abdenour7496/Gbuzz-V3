@@ -1,15 +1,11 @@
 # Production hardening for application services. Standalone: combine with
 # docker-compose.yml plus any feature overlays. When the observability profile is
 # enabled, also add docker-compose.observability-production.yml.
+# GCOR services already get no-new-privileges, cap_drop and a /tmp tmpfs from the base
+# file; list-valued keys are declared once so every Compose version merges them cleanly.
 x-app-hardening: &app-hardening
-  security_opt:
-    - no-new-privileges:true
-  cap_drop:
-    - ALL
   init: true
   read_only: true
-  tmpfs:
-    - /tmp:size=128m,mode=1777
   logging:
     driver: json-file
     options:
@@ -19,6 +15,10 @@ x-app-hardening: &app-hardening
 services:
   relay:
     <<: *app-hardening
+    cap_drop:
+      - ALL
+    tmpfs:
+      - /tmp:size=128m,mode=1777
     environment:
       BUZZ_AUTO_MIGRATE: "false"
     mem_limit: ${RELAY_MEMORY_LIMIT:-1g}
@@ -42,6 +42,12 @@ services:
 
   graphiti-projector:
     <<: *app-hardening
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    tmpfs:
+      - /tmp:size=128m,mode=1777
     mem_limit: ${GRAPHITI_PROJECTOR_MEMORY_LIMIT:-512m}
     cpus: ${GRAPHITI_PROJECTOR_CPU_LIMIT:-0.5}
     environment:
