@@ -1,8 +1,8 @@
 # buzzG
 
-buzzG adds a self-contained knowledge layer to a local [Buzz](https://github.com/block/buzz) deployment. Chat sessions are the primary knowledge container; people, agents, and uploaded documents are participants that contribute entries to one authoritative PostgreSQL schema. MinIO retains the original and normalized recovery artifacts, GCOR provides governed document retrieval, and [Graphiti](https://github.com/getzep/graphiti) builds the rebuildable temporal context graph through its MCP server.
+buzzG adds a self-contained knowledge layer to a local [Buzz](https://github.com/block/buzz) deployment. Chat sessions are the primary knowledge container; people, agents, and uploaded documents are participants that contribute entries to one authoritative PostgreSQL schema. GCOR stores the original and normalized recovery artifacts (in PostgreSQL or MinIO), provides governed document retrieval, and keeps the knowledge graph and bi-temporal facts in PostgreSQL.
 
-Docker Compose starts Buzz, PostgreSQL with pgvector, Redis, MinIO, Ollama, GCOR, and the Buzz event projector. Graphiti, FalkorDB and their projector are an optional extension, disabled by default. See [optional graph setup and reactivation](docs/optional-graph.md).
+Docker Compose starts Buzz, PostgreSQL with pgvector, Redis, MinIO, Ollama, GCOR, and the Buzz event projector. The former Graphiti/FalkorDB extension was retired; see [docs/optional-graph.md](docs/optional-graph.md).
 
 The optional [knowledge workspace](http://127.0.0.1:5011/workspace) uses existing Buzz/Nostr identities for proposals, review and governed answers. See [enterprise workflows and operating evidence](docs/enterprise-workflows.md) and [identity setup](docs/enterprise-pilot-setup.md).
 
@@ -21,7 +21,6 @@ The [Buzz Knowledge agent](docs/buzz-chat-knowledge.md) now supports discussion 
 | GCOR proxy | `http://127.0.0.1:5001` | HTTP ingestion, retrieval, collection, health, and metrics API. |
 | GCOR health | `http://127.0.0.1:5001/health` | GCOR proxy health check. |
 | GCOR MCP SSE | `http://127.0.0.1:8765/sse` | MCP endpoint for local MCP clients. |
-| Graphiti MCP HTTP | `http://127.0.0.1:8000/mcp/` | Temporal entity, relationship, episode, and graph-search tools. |
 | MinIO API | `http://127.0.0.1:9000` | S3-compatible object API. |
 | MinIO console | `http://127.0.0.1:9001` | MinIO administration console. |
 
@@ -34,8 +33,7 @@ Component ownership is intentionally non-overlapping:
 - PostgreSQL is authoritative for sessions, participants, normalized entries, document metadata, governance state, chunks, and projection status.
 - MinIO is authoritative for original bytes plus Markdown and JSON recovery bundles.
 - GCOR owns ingestion, governance, vector/full-text document retrieval, citations, and recovery.
-- Graphiti owns entity extraction, relationship inference, temporal fact invalidation, episode provenance, and context-graph search.
-- FalkorDB stores only Graphiti's rebuildable projection. Deleting it does not delete authoritative knowledge.
+- The relationship projector and `gcor.facts` provide entities, relationships and temporal fact invalidation in PostgreSQL.
 
 ## Prerequisites
 
@@ -77,7 +75,7 @@ Component ownership is intentionally non-overlapping:
    docker compose -f docker-compose.yml -f docker-compose.stack-only.yml up -d --build
    ```
 
-   On the first run, Ollama downloads the configured embedding and generation models. The optional graph extension separately downloads its extraction/embedding models and builds Graphiti from pinned upstream `v0.29.3` source when enabled.
+   On the first run, Ollama downloads the configured embedding and generation models.
 
 4. Check the service state:
 
@@ -174,7 +172,7 @@ Docker health state of explicitly labelled Gbuzz containers and exposes:
 
 After three consecutive unhealthy observations, the controller may restart the
 relay and stateless GCOR, MCP, and projector services. PostgreSQL, Redis, MinIO,
-Ollama, and FalkorDB are deliberately monitor-only. A five-minute per-service
+and Ollama are deliberately monitor-only. A five-minute per-service
 cooldown and a default budget of three recovery actions per hour prevent restart
 loops. Successful and failed decisions are appended to the persistent
 `recovery-audit-data` volume, and the recent budget is restored after controller
@@ -195,7 +193,7 @@ system calls are rejected before they reach the engine. The controller has no
 mutation API or general command runner: remediation is limited to immutable
 Compose labels. Do not expose the controller publicly.
 
-Service networks are split: PostgreSQL, Redis and FalkorDB sit on an internal
+Service networks are split: PostgreSQL and Redis sit on an internal
 `data-net` reachable only from the relay, GCOR services, migrations and the
 monitoring exporters; MinIO joins it as well and keeps its localhost console on
 `buzz-net`. Everything else (MCP bridge, Ollama, controller, Grafana) cannot open
@@ -485,46 +483,7 @@ curl.exe -X POST http://127.0.0.1:5001/api/retrieve `
 
 `top_k` controls how many results are returned. `hops` controls graph expansion from matching chunks; use `0` for search only. Results contain `chunks`, `graph_nodes`, and a `reflection` value of `graph`, `chunks`, or `empty`. Each returned chunk includes `vector_score`, `lexical_score`, and the combined `score`.
 
-Every successful ingestion also writes to `gcor.knowledge_sessions`, `gcor.knowledge_participants`, and `gcor.knowledge_entries`. Messages become user or agent contributions. Uploaded files become `document` participants; each document chunk is a bounded, provenance-bearing contribution to the same session. `gcor.graphiti_projection` records delivery state and reconciles Graphiti's minted episode UUID back to the authoritative entry after background processing.
-
-The Graphiti projector sends the common JSON schema in `schemas/session-knowledge-entry.schema.json` through the upstream MCP `add_memory` tool. It probes the live tool schema, supplies `reference_time`, groups episodes by session, and uses `get_episodes` to reconcile generated identifiers. It allows one globally in-flight extraction at a time because Graphiti only serializes work inside each group; this prevents many sessions from overwhelming limited local hardware. Accepted work that never becomes queryable is retried after `GRAPHITI_PROJECTOR_SUBMISSION_TIMEOUT_MINUTES`, up to the configured attempt limit. Query Graphiti directly through tools such as `search_nodes`, `search_memory_facts`, `get_episodes`, and `get_episode_entities`.
-
-Inspect delivery state independently of core service health:
-
-```powershell
-curl.exe -H "X-Gcor-Webhook-Secret: $stackSecret" http://127.0.0.1:5001/api/graphiti/status
-```
-
-When the graph extension is enabled, `in_flight` should never exceed one and `dead_letter` must be zero before a graph-enabled production release. When disabled, pending projection records are retained intentionally for later catch-up; they do not block core releases. Failed entries remain in PostgreSQL and can be safely replayed because FalkorDB is a derived projection.
-
-Inspect the four release-blocking backlog classes and fail closed unless all are zero:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File scripts/graphiti-projection-release-gate.ps1
-```
-
-For historical failures, reconcile already-created Graphiti episodes first and requeue at most ten projection records in one operator action (exhausted rows have their projection-attempt budget reset):
-
-```powershell
-powershell -ExecutionPolicy Bypass -File scripts/graphiti-projection-replay.ps1 -Limit 10
-```
-
-The replay command only updates `gcor.graphiti_projection`; it never changes authoritative sessions, participants, entries, documents, ingestion records, or recovery objects. Repeat bounded batches while observing the projector, then rerun the release gate.
-
-### Production Graphiti inference
-
-Local Compose remains fully self-contained and uses Ollama. On hardware that cannot run reliable temporal extraction, use the production override to send Graphiti LLM and embedding requests to OpenAI while retaining PostgreSQL, pgvector, MinIO, Graphiti MCP, and FalkorDB locally:
-
-```powershell
-$env:OPENAI_API_KEY = "..."
-docker compose -f docker-compose.yml -f docker-compose.production.yml -f docker-compose.graph.yml -f docker-compose.graph-production.yml up -d --build
-```
-
-When the `observability` profile is part of the deployment, also add
-`-f docker-compose.observability.yml -f docker-compose.observability-production.yml --profile observability`
-so Alertmanager loads the deployment receiver from `ALERTMANAGER_CONFIG_FILE`.
-
-The production default embedding model is `text-embedding-3-small` with 1536 dimensions. The API key is required at Compose interpolation time and must not be committed. Local and production Graphiti embeddings have different dimensions; after a mode change, rebuild the FalkorDB Graphiti projection from authoritative PostgreSQL rather than mixing vectors in one graph. This override changes Graphiti inference only; GCOR's PostgreSQL `pgvector` index retains its independently configured embedding model and dimension.
+Every successful ingestion also writes to `gcor.knowledge_sessions`, `gcor.knowledge_participants`, and `gcor.knowledge_entries`. Messages become user or agent contributions. Uploaded files become `document` participants; each document chunk is a bounded, provenance-bearing contribution to the same session. `gcor.graphiti_projection` is retained from the retired graph extension and is not consumed; see [docs/optional-graph.md](docs/optional-graph.md).
 
 Retrieval uses normalized weights of `0.75` for vector similarity and `0.25` for full-text rank by default. Override them per request when a query requires more exact-keyword matching:
 
@@ -697,13 +656,7 @@ For a local desktop MCP client, register this SSE endpoint:
 http://127.0.0.1:8765/sse
 ```
 
-Register Graphiti independently using streamable HTTP:
-
-```text
-http://127.0.0.1:8000/mcp/
-```
-
-Agents should use GCOR MCP for governed ingestion, lifecycle operations, document retrieval, and citations. They should use Graphiti MCP for temporal facts, entity relationships, episode history, and graph-native context queries.
+Agents use GCOR MCP for governed ingestion, lifecycle operations, document retrieval, citations and fact history (`fact_history`).
 
 The repository includes the corresponding VS Code MCP configuration in [.vscode/mcp.json](.vscode/mcp.json). From an agent running inside the Docker Compose network, use `http://mcp-postgres-gcor:8765/sse` instead.
 

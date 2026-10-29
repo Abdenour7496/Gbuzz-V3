@@ -37,7 +37,6 @@ from db_scope import ScopedPool
 from enterprise_workflows import router as workspace_router, worker as ingestion_worker
 from document_parsing import extract as parse_document
 from parser_client import extract as parse_isolated_document
-from graph_retrieval import candidates as graph_candidates
 import reranker
 import unanswered
 import temporal_facts
@@ -820,6 +819,15 @@ async def ensure_bucket_name(client: Any, bucket_name: str) -> None:
         Bucket=bucket_name,
         VersioningConfiguration={"Status": "Enabled"},
     )
+
+
+async def graph_candidates(pool, query, channel_id, access_level, agent_id, subject=None) -> list:
+    """Graph-suggested document ids for retrieval; none since the Graphiti leg was retired.
+
+    Kept as the hook for a PostgreSQL shared-concept leg. Whatever it returns is only a hint:
+    the retrieval query re-applies channel, access, approval, evidence and reader filters.
+    """
+    return []
 
 
 async def embed(texts: list[str]) -> list[list[float]]:

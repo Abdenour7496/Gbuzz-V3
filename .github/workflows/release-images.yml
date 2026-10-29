@@ -31,12 +31,6 @@ jobs:
           - image: mcp-postgres-gcor
             context: mcp-postgres-gcor
             dockerfile: mcp-postgres-gcor/Dockerfile
-          - image: graphiti-mcp
-            context: graphiti-mcp
-            dockerfile: graphiti-mcp/Dockerfile
-          - image: graphiti-projector
-            context: .
-            dockerfile: graphiti-projector/Dockerfile
           - image: gcor-event-projector
             context: .
             dockerfile: projector/Dockerfile

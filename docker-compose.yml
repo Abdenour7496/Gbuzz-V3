@@ -308,121 +308,6 @@ services:
       com.gbuzz.recovery.action: restart
     networks: [buzz-net]
 
-  falkordb:
-    profiles: [graph]
-    image: falkordb/falkordb:v4.20.1
-    restart: unless-stopped
-    environment:
-      REDIS_ARGS: --requirepass ${REDIS_PASSWORD:?set REDIS_PASSWORD} --appendonly yes --appendfsync everysec
-      FALKORDB_PASSWORD: ${REDIS_PASSWORD:?set REDIS_PASSWORD}
-      BROWSER: "0"
-    volumes:
-      - buzz-falkordb-data:/var/lib/falkordb/data
-    healthcheck:
-      test: ["CMD-SHELL", "redis-cli -a \"$${FALKORDB_PASSWORD}\" --no-auth-warning ping | grep -q PONG"]
-      interval: 10s
-      timeout: 5s
-      retries: 12
-      start_period: 15s
-    labels:
-      com.gbuzz.recovery.enabled: "true"
-      com.gbuzz.recovery.stack: ${RECOVERY_STACK_ID:-gbuzz}
-      com.gbuzz.recovery.service: falkordb
-      com.gbuzz.recovery.action: monitor
-    networks: [data-net]
-
-  graphiti-mcp:
-    profiles: [graph]
-    image: gbuzz-graphiti-mcp:0.29.3
-    build:
-      context: graphiti-mcp
-      dockerfile: Dockerfile
-      args:
-        GRAPHITI_VERSION: v0.29.3
-        GRAPHITI_CORE_VERSION: 0.29.3
-    command: ["uv", "run", "--no-sync", "main.py", "--config", "/app/mcp/config/gbuzz.yaml"]
-    restart: unless-stopped
-    depends_on:
-      falkordb:
-        condition: service_healthy
-      graphiti-model-init:
-        condition: service_completed_successfully
-    environment:
-      CONFIG_PATH: /app/mcp/config/gbuzz.yaml
-      FALKORDB_URI: redis://falkordb:6379
-      FALKORDB_PASSWORD: ${REDIS_PASSWORD:?set REDIS_PASSWORD}
-      FALKORDB_DATABASE: ${FALKORDB_DATABASE:-gbuzz}
-      GRAPHITI_LLM_API_KEY: ${GRAPHITI_LLM_API_KEY:-ollama}
-      GRAPHITI_LLM_API_URL: ${GRAPHITI_LLM_API_URL:-http://ollama:11434/v1}
-      GRAPHITI_LLM_MODEL: ${GRAPHITI_MODEL:-qwen2.5:7b}
-      GRAPHITI_EMBEDDING_API_KEY: ${GRAPHITI_EMBEDDING_API_KEY:-ollama}
-      GRAPHITI_EMBEDDING_API_URL: ${GRAPHITI_EMBEDDING_API_URL:-http://ollama:11434/v1}
-      GRAPHITI_EMBEDDING_MODEL: ${GRAPHITI_EMBEDDING_MODEL:-nomic-embed-text}
-      GRAPHITI_EMBEDDING_DIMS: ${GRAPHITI_EMBEDDING_DIMS:-768}
-      SEMAPHORE_LIMIT: ${GRAPHITI_SEMAPHORE_LIMIT:-1}
-      GRAPHITI_TELEMETRY_ENABLED: "false"
-    volumes:
-      - ./graphiti-mcp/config.yaml:/app/mcp/config/gbuzz.yaml:ro
-    ports:
-      - "${GRAPHITI_MCP_BIND_ADDR:-127.0.0.1}:${GRAPHITI_MCP_PORT:-8000}:8000"
-    labels:
-      com.gbuzz.recovery.enabled: "true"
-      com.gbuzz.recovery.stack: ${RECOVERY_STACK_ID:-gbuzz}
-      com.gbuzz.recovery.service: graphiti-mcp
-      com.gbuzz.recovery.action: restart
-    networks: [buzz-net, data-net]
-
-  graphiti-projector:
-    profiles: [graph]
-    build:
-      context: .
-      dockerfile: graphiti-projector/Dockerfile
-    restart: unless-stopped
-    depends_on:
-      graphiti-mcp:
-        condition: service_healthy
-      gcor-proxy:
-        condition: service_healthy
-    environment:
-      POSTGRES_HOST: postgres
-      POSTGRES_PORT: "5432"
-      POSTGRES_USER: ${GCOR_DB_USER:-${POSTGRES_USER:-buzz}}
-      POSTGRES_PASSWORD: ${GCOR_DB_PASSWORD:-${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}}
-      POSTGRES_DB: ${POSTGRES_DB:-buzz}
-      GRAPHITI_MCP_URL: http://graphiti-mcp:8000/mcp
-      GRAPHITI_MCP_HOST_HEADER: localhost:8000
-      GRAPHITI_PROJECTOR_POLL_SECONDS: ${GRAPHITI_PROJECTOR_POLL_SECONDS:-2}
-      GRAPHITI_PROJECTOR_MAX_ATTEMPTS: ${GRAPHITI_PROJECTOR_MAX_ATTEMPTS:-8}
-      GRAPHITI_PROJECTOR_PROCESSING_TIMEOUT_MINUTES: ${GRAPHITI_PROJECTOR_PROCESSING_TIMEOUT_MINUTES:-15}
-      GRAPHITI_PROJECTOR_SUBMISSION_TIMEOUT_MINUTES: ${GRAPHITI_PROJECTOR_SUBMISSION_TIMEOUT_MINUTES:-45}
-    labels:
-      com.gbuzz.recovery.enabled: "true"
-      com.gbuzz.recovery.stack: ${RECOVERY_STACK_ID:-gbuzz}
-      com.gbuzz.recovery.service: graphiti-projector
-      com.gbuzz.recovery.action: restart
-    networks: [buzz-net, data-net]
-
-  graphiti-model-init:
-    profiles: [graph]
-    # Pinned to the digest recorded in docker-compose.production.lock.yml; override OLLAMA_IMAGE to upgrade deliberately.
-    image: ${OLLAMA_IMAGE:-ollama/ollama@sha256:d5034f60974be528e0a5523ba5e89156e4a9ffd12d0b2b18475fb148237f3d4c}
-    restart: "no"
-    depends_on:
-      ollama:
-        condition: service_healthy
-    entrypoint: ["sh", "-ec"]
-    environment:
-      OLLAMA_HOST: ollama:11434
-      GRAPHITI_MODEL: ${GRAPHITI_MODEL:-qwen2.5:7b}
-      GRAPHITI_EMBEDDING_MODEL: ${GRAPHITI_EMBEDDING_MODEL:-nomic-embed-text}
-      GRAPHITI_LLM_API_URL: ${GRAPHITI_LLM_API_URL:-http://ollama:11434/v1}
-      GRAPHITI_EMBEDDING_API_URL: ${GRAPHITI_EMBEDDING_API_URL:-http://ollama:11434/v1}
-    command:
-      - |
-        if [ "$${GRAPHITI_LLM_API_URL}" = "http://ollama:11434/v1" ]; then ollama pull "$${GRAPHITI_MODEL}"; fi
-        if [ "$${GRAPHITI_EMBEDDING_API_URL}" = "http://ollama:11434/v1" ]; then ollama pull "$${GRAPHITI_EMBEDDING_MODEL}"; fi
-    networks: [buzz-net]
-
   gcor-event-projector:
     build:
       context: .
@@ -517,7 +402,6 @@ volumes:
   buzz-minio-data:
   buzz-git-data:
   ollama-data:
-  buzz-falkordb-data:
   recovery-audit-data:
 
 networks:

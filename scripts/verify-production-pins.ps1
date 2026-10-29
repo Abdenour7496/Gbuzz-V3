@@ -13,7 +13,7 @@ if (-not (Test-Path -LiteralPath $ComposeFile)) {
 }
 
 $composeFiles = @("-f", "docker-compose.yml", "-f", "docker-compose.enterprise.yml", "-f", "docker-compose.buzz.yml", "-f", "docker-compose.knowledge-trust.yml")
-if ($IncludeGraph) { $composeFiles += @("-f", "docker-compose.graph.yml") }
+if ($IncludeGraph) { throw 'The graph extension was retired: Graphiti and FalkorDB are no longer part of Gbuzz (see docs/optional-graph.md).' }
 if ($IncludeObservability) {
     $composeFiles += @("-f", "docker-compose.observability.yml")
     $composeFiles += @("--profile", "observability")

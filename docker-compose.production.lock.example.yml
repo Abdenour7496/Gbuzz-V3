@@ -15,20 +15,12 @@ services:
     image: ollama/ollama@sha256:REPLACE_WITH_64_HEX_CHARACTERS
   ollama-init:
     image: ollama/ollama@sha256:REPLACE_WITH_64_HEX_CHARACTERS
-  graphiti-model-init:
-    image: ollama/ollama@sha256:REPLACE_WITH_64_HEX_CHARACTERS
   gcor-migrate:
     image: pgvector/pgvector@sha256:REPLACE_WITH_64_HEX_CHARACTERS
   gcor-proxy:
     image: gbuzz-gcor-proxy:REPLACE_WITH_GIT_COMMIT
   mcp-postgres-gcor:
     image: gbuzz-mcp-postgres-gcor:REPLACE_WITH_GIT_COMMIT
-  falkordb:
-    image: falkordb/falkordb@sha256:REPLACE_WITH_64_HEX_CHARACTERS
-  graphiti-mcp:
-    image: gbuzz-graphiti-mcp:REPLACE_WITH_GIT_COMMIT
-  graphiti-projector:
-    image: gbuzz-graphiti-projector:REPLACE_WITH_GIT_COMMIT
   gcor-event-projector:
     image: gbuzz-event-projector:REPLACE_WITH_GIT_COMMIT
   recovery-controller:

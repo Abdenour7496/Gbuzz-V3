@@ -7,9 +7,6 @@ updates:
     directory: /projector
     schedule: {interval: weekly}
   - package-ecosystem: pip
-    directory: /graphiti-projector
-    schedule: {interval: weekly}
-  - package-ecosystem: pip
     directory: /mcp-postgres-gcor
     schedule: {interval: weekly}
   - package-ecosystem: github-actions
@@ -20,9 +17,6 @@ updates:
     schedule: {interval: weekly}
   - package-ecosystem: docker
     directory: /projector
-    schedule: {interval: weekly}
-  - package-ecosystem: docker
-    directory: /graphiti-projector
     schedule: {interval: weekly}
   - package-ecosystem: docker
     directory: /mcp-postgres-gcor
