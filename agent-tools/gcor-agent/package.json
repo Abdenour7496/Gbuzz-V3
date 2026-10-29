@@ -23,5 +23,8 @@
   },
   "devDependencies": {
     "esbuild": "0.25.9"
+  },
+  "overrides": {
+    "@hono/node-server": "2.1.3"
   }
 }
