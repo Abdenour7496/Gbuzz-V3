@@ -81,6 +81,7 @@ REDIS_PASSWORD=$redisPassword
 BUZZ_S3_ACCESS_KEY=$s3AccessKey
 BUZZ_S3_SECRET_KEY=$s3SecretKey
 BUZZ_S3_BUCKET=buzz-media
+GCOR_OBJECT_STORE=postgres
 GCOR_S3_BUCKET=buzz-gcor
 GCOR_S3_ACCESS_KEY=gcor-service
 GCOR_S3_SECRET_KEY=$gcorS3SecretKey

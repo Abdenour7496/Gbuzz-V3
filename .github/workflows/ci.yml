@@ -133,7 +133,7 @@ jobs:
         if: matrix.component == 'proxy'
         env:
           PYTHONPATH: proxy
-        run: python -m unittest -v tests/test_ingest_governance.py tests/test_retrieval_quality.py tests/test_unanswered.py tests/test_judge_answers.py tests/test_draft_evaluation.py tests/test_production_safeguards.py tests/test_governance_egress.py tests/test_enterprise_access.py tests/test_enterprise_workflows.py tests/test_evaluation.py tests/test_graph_retrieval.py tests/test_buzz_chat.py tests/test_buzz_synthesis.py tests/test_buzz_cards.py tests/test_backup_evidence.py tests/test_minio_references.py tests/test_reliability_automation.py tests/test_governance_control_package.py tests/test_temporal_facts.py
+        run: python -m unittest -v tests/test_ingest_governance.py tests/test_retrieval_quality.py tests/test_unanswered.py tests/test_judge_answers.py tests/test_draft_evaluation.py tests/test_production_safeguards.py tests/test_governance_egress.py tests/test_enterprise_access.py tests/test_enterprise_workflows.py tests/test_evaluation.py tests/test_graph_retrieval.py tests/test_buzz_chat.py tests/test_buzz_synthesis.py tests/test_buzz_cards.py tests/test_backup_evidence.py tests/test_minio_references.py tests/test_object_store.py tests/test_audit_pack.py tests/test_reliability_automation.py tests/test_governance_control_package.py tests/test_temporal_facts.py
 
   recovery-tests:
     name: Python tests (recovery-controller)
@@ -205,7 +205,15 @@ jobs:
         run: |
           docker compose -p gbuzz-integration -f docker-compose.integration.yml stop gcor-proxy
           docker compose -p gbuzz-integration -f docker-compose.integration.yml run --rm --no-deps -e PYTHONPATH=/app gcor-proxy python /app/tests/integration/governance_faults.py
-      - name: Verify real storage outage and process restart recovery
+      - name: Verify PostgreSQL object store (versions, conditional writes, runtime-role immutability)
+        run: |
+          docker compose -p gbuzz-integration -f docker-compose.integration.yml up -d --no-deps --wait --wait-timeout 60 gcor-proxy
+          docker compose -p gbuzz-integration -f docker-compose.integration.yml exec -T -e PYTHONPATH=/app -e GCOR_TEST_PG_DSN=postgresql://gcor_runtime:runtime-secret@postgres:5432/integration gcor-proxy python -m unittest -v tests/test_object_store.py
+      - name: Verify S3-to-PostgreSQL object copy
+        run: docker compose -p gbuzz-integration -f docker-compose.integration.yml exec -T -e PYTHONPATH=/app gcor-proxy python /app/tests/integration/object_store_migration.py
+      - name: Verify real storage outage and process restart recovery (S3 mode)
+        env:
+          INTEGRATION_OBJECT_STORE: s3
         run: |
           docker compose -p gbuzz-integration -f docker-compose.integration.yml up -d --no-deps --wait --wait-timeout 60 gcor-proxy
           docker compose -p gbuzz-integration -f docker-compose.integration.yml stop minio
@@ -214,6 +222,8 @@ jobs:
           docker compose -p gbuzz-integration -f docker-compose.integration.yml start minio
           docker compose -p gbuzz-integration -f docker-compose.integration.yml start gcor-proxy
           docker compose -p gbuzz-integration -f docker-compose.integration.yml exec -T gcor-proxy python /app/tests/integration/governance_outage.py verify
+      - name: Return the proxy to PostgreSQL object storage
+        run: docker compose -p gbuzz-integration -f docker-compose.integration.yml up -d --no-deps --wait --wait-timeout 60 gcor-proxy
       - name: Verify runtime role privileges and row-level security scope
         run: docker compose -p gbuzz-integration -f docker-compose.integration.yml exec -T -e PYTHONPATH=/app gcor-proxy python /app/tests/integration/rls_scope.py
       - name: Verify relationship migration and dedicated workload RLS
