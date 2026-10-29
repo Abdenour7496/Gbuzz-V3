@@ -9,12 +9,11 @@ x-knowledge-runtime: &knowledge-runtime
   EMBEDDING_BACKEND: ollama
   OLLAMA_HOST: http://ollama:11434
 
+# The base file already applies no-new-privileges, cap_drop and a /tmp tmpfs to these
+# services; repeating list-valued keys here would duplicate them on older Compose versions.
 x-hardening: &hardening
   user: "10001:10001"
-  security_opt: [no-new-privileges:true]
-  cap_drop: [ALL]
   read_only: true
-  tmpfs: ["/tmp:size=128m,mode=1777"]
   init: true
 
 services:
@@ -52,7 +51,6 @@ services:
     environment:
       RECOVERY_STACK_ID: ${RECOVERY_STACK_ID:-gbuzz}
     read_only: true
-    cap_drop: [ALL]
     healthcheck:
       test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:2375/_ping')"]
       interval: 10s
