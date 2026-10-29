@@ -14,7 +14,6 @@ COPY proxy/nostr_auth.py .
 COPY proxy/enterprise_workflows.py .
 COPY proxy/document_parsing.py .
 COPY proxy/parser_client.py .
-COPY proxy/graph_retrieval.py .
 COPY proxy/reranker.py .
 COPY proxy/unanswered.py .
 COPY proxy/temporal_facts.py .

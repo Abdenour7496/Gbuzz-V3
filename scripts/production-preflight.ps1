@@ -70,18 +70,13 @@ try {
     }
 
     $graphArgs = @()
-    if ($IncludeGraph) { $graphArgs = @('-f', 'docker-compose.graph.yml') }
+    if ($IncludeGraph) { throw 'The graph extension was retired: Graphiti and FalkorDB are no longer part of Gbuzz (see docs/optional-graph.md).' }
     & docker compose --env-file $EnvFile -f docker-compose.yml -f docker-compose.observability.yml -f docker-compose.production.yml -f docker-compose.observability-production.yml -f docker-compose.enterprise.yml -f docker-compose.buzz.yml -f docker-compose.knowledge-trust.yml @graphArgs -f $LockFile --profile observability config --quiet
     if ($LASTEXITCODE -ne 0) { throw "Production Compose rendering failed." }
     $pinArgs = @()
-    if ($IncludeGraph) { $pinArgs += '-IncludeGraph' }
     & powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-production-pins.ps1 -ComposeFile $LockFile -RequireRegistry @pinArgs
     if ($LASTEXITCODE -ne 0) { throw "Production image pin verification failed." }
 
-    if ($IncludeGraph -and -not $SkipProjectionGate) {
-        & powershell -NoProfile -ExecutionPolicy Bypass -File scripts/graphiti-projection-release-gate.ps1
-        if ($LASTEXITCODE -ne 0) { throw "Graphiti projection backlog is not empty." }
-    }
     Write-Output "Production P0 preflight passed for commit $(git rev-parse HEAD)."
 }
 finally { Pop-Location }

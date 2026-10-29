@@ -3,7 +3,7 @@ param()
 
 $ErrorActionPreference = "Stop"
 $workspace = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
-$components = @("proxy", "projector", "graphiti-projector", "mcp-postgres-gcor")
+$components = @("proxy", "projector", "mcp-postgres-gcor")
 
 foreach ($component in $components) {
     docker run --rm `

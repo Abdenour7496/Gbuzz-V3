@@ -40,13 +40,6 @@ services:
     mem_limit: ${GCOR_MCP_MEMORY_LIMIT:-512m}
     cpus: ${GCOR_MCP_CPU_LIMIT:-0.5}
 
-  graphiti-projector:
-    <<: *app-hardening
-    mem_limit: ${GRAPHITI_PROJECTOR_MEMORY_LIMIT:-512m}
-    cpus: ${GRAPHITI_PROJECTOR_CPU_LIMIT:-0.5}
-    environment:
-      GRAPHITI_PROJECTOR_SUBMISSION_TIMEOUT_MINUTES: ${GRAPHITI_PROJECTOR_SUBMISSION_TIMEOUT_MINUTES:-15}
-
   gcor-event-projector:
     <<: *app-hardening
     mem_limit: ${EVENT_PROJECTOR_MEMORY_LIMIT:-512m}

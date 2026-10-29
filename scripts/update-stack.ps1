@@ -62,7 +62,7 @@ try {
 
         Import-Module (Join-Path $PSScriptRoot 'ComposePlan.psm1') -Force
         $plan = Get-GbuzzComposePlan $repoRoot (Join-Path $repoRoot 'config/windows-startup.compose-files.json')
-        if ($IncludeGraph) { throw 'Select and review an explicit graph deployment plan before updating.' }
+        if ($IncludeGraph) { throw 'The graph extension was retired: Graphiti and FalkorDB are no longer part of Gbuzz (see docs/optional-graph.md).' }
         $composeArgs = @('compose') + $plan.Arguments
         if (@($plan.Files | Where-Object { $_ -like '*knowledge-trust*' }).Count) {
             throw 'The knowledge trust release is pinned. Build and verify a new release before replacing its images; automatic image refresh is disabled.'
@@ -79,12 +79,6 @@ try {
         Write-Host "Applying the update and waiting for health checks..."
         & docker @composeArgs up -d --wait --wait-timeout $WaitTimeoutSeconds
         if ($LASTEXITCODE -ne 0) { throw "Updated stack did not become healthy within $WaitTimeoutSeconds seconds." }
-
-        if ($IncludeGraph) {
-            Write-Host "Waiting for the Graphiti projection release gate..."
-            & powershell -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot "graphiti-projection-release-gate.ps1") -WaitSeconds $WaitTimeoutSeconds
-            if ($LASTEXITCODE -ne 0) { throw "Graphiti projection release gate failed." }
-        }
 
         $message = "Stack update completed; observability=$IncludeObservability; graph=$IncludeGraph"
         Write-Audit "success" $message

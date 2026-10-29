@@ -5,8 +5,5 @@ services:
   mcp-postgres-gcor:
     ports: !reset []
 
-  graphiti-mcp:
-    ports: !reset []
-
   recovery-controller:
     ports: !reset []
